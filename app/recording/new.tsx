@@ -171,10 +171,13 @@ export default function NewRecordingScreen() {
       
       // Upload audio file using multipart form data
       const formData = new FormData();
+      
+      // React Native FormData requires the file object in a specific format
+      const fileExtension = audioUri.split('.').pop() || 'm4a';
       formData.append('audio', {
         uri: audioUri,
-        type: 'audio/m4a',
-        name: 'recording.m4a',
+        type: `audio/${fileExtension}`,
+        name: `recording.${fileExtension}`,
       } as any);
 
       const token = await getBearerToken();
@@ -184,6 +187,7 @@ export default function NewRecordingScreen() {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${token}`,
+            // Don't set Content-Type - let the browser/RN set it with boundary
           },
           body: formData,
         }
@@ -232,7 +236,7 @@ export default function NewRecordingScreen() {
   };
 
   const isRecording = recorderState.isRecording;
-  const currentTime = recorderState.currentTime || 0;
+  const currentTime = (recorderState.durationMillis || 0) / 1000; // Convert milliseconds to seconds
   const timeDisplay = formatTime(currentTime);
 
   return (
