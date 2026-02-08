@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { Project, Recording } from '@/types';
-import { authenticatedGet } from '@/utils/api';
+import { authenticatedGet, authenticatedGetText } from '@/utils/api';
 import { Modal } from '@/components/ui/Modal';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -99,7 +99,7 @@ export default function ProjectDetailScreen() {
   const handleExportCSV = async () => {
     console.log('[ProjectDetailScreen] User tapped Export CSV button');
     try {
-      const csvData = await authenticatedGet<string>(`/api/projects/${id}/export-csv`);
+      const csvData = await authenticatedGetText(`/api/projects/${id}/export-csv`);
       
       // Save CSV to file system
       const fileUri = `${FileSystem.documentDirectory}project_${id}_export.csv`;

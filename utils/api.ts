@@ -41,12 +41,14 @@ export const getBearerToken = async (): Promise<string | null> => {
  *
  * @param endpoint - API endpoint path (e.g., '/users', '/auth/login')
  * @param options - Fetch options (method, headers, body, etc.)
- * @returns Parsed JSON response
+ * @param responseType - Expected response type: 'json' (default) or 'text'
+ * @returns Parsed JSON response or text
  * @throws Error if backend is not configured or request fails
  */
 export const apiCall = async <T = any>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit,
+  responseType: 'json' | 'text' = 'json'
 ): Promise<T> => {
   if (!isBackendConfigured()) {
     throw new Error("Backend URL not configured. Please rebuild the app.");
@@ -83,9 +85,13 @@ export const apiCall = async <T = any>(
       throw new Error(`API error: ${response.status} - ${text}`);
     }
 
-    const data = await response.json();
-    console.log("[API] Success:", data);
-    return data;
+    const data = responseType === 'text' ? await response.text() : await response.json();
+    if (responseType === 'text') {
+      console.log("[API] Success: Text response received, length:", (data as string).length);
+    } else {
+      console.log("[API] Success:", data);
+    }
+    return data as T;
   } catch (error) {
     console.error("[API] Request failed:", error);
     throw error;
@@ -155,12 +161,14 @@ export const apiDelete = async <T = any>(endpoint: string, data: any = {}): Prom
  *
  * @param endpoint - API endpoint path
  * @param options - Fetch options (method, headers, body, etc.)
- * @returns Parsed JSON response
+ * @param responseType - Expected response type: 'json' (default) or 'text'
+ * @returns Parsed JSON response or text
  * @throws Error if token not found or request fails
  */
 export const authenticatedApiCall = async <T = any>(
   endpoint: string,
-  options?: RequestInit
+  options?: RequestInit,
+  responseType: 'json' | 'text' = 'json'
 ): Promise<T> => {
   const token = await getBearerToken();
 
@@ -174,7 +182,7 @@ export const authenticatedApiCall = async <T = any>(
       ...options?.headers,
       Authorization: `Bearer ${token}`,
     },
-  });
+  }, responseType);
 };
 
 /**
@@ -182,6 +190,13 @@ export const authenticatedApiCall = async <T = any>(
  */
 export const authenticatedGet = async <T = any>(endpoint: string): Promise<T> => {
   return authenticatedApiCall<T>(endpoint, { method: "GET" });
+};
+
+/**
+ * Authenticated GET request for text response (e.g., CSV files)
+ */
+export const authenticatedGetText = async (endpoint: string): Promise<string> => {
+  return authenticatedApiCall<string>(endpoint, { method: "GET" }, 'text');
 };
 
 /**
