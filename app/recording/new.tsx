@@ -168,6 +168,7 @@ export default function NewRecordingScreen() {
       );
 
       console.log('[NewRecordingScreen] Uploading audio file to recording:', createResponse.id);
+      console.log('[NewRecordingScreen] Audio URI:', audioUri);
       
       // Upload audio file using multipart form data
       const formData = new FormData();
@@ -194,9 +195,12 @@ export default function NewRecordingScreen() {
       );
 
       if (!uploadResponse.ok) {
-        throw new Error('Failed to upload audio file');
+        const errorText = await uploadResponse.text();
+        console.error('[NewRecordingScreen] Upload failed with status:', uploadResponse.status, errorText);
+        throw new Error(`Failed to upload audio file: ${uploadResponse.status} - ${errorText}`);
       }
 
+      console.log('[NewRecordingScreen] Upload successful');
       setModal({
         visible: true,
         title: 'Success',
