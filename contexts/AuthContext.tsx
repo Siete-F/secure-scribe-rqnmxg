@@ -146,6 +146,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (Platform.OS === "web") {
         const token = await openOAuthPopup(provider);
         await setBearerToken(token);
+        // Give a small delay to ensure token is persisted to localStorage
+        await new Promise(resolve => setTimeout(resolve, 100));
         await fetchUser();
       } else {
         // Native: Use expo-linking to generate a proper deep link
