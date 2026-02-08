@@ -128,7 +128,7 @@ export function registerProjectRoutes(app: App) {
       );
 
       // Build insert values, only including defined fields to avoid Drizzle using 'default' keyword
-      const insertValues: any = {
+      const insertValues: Partial<NewProject> = {
         userId: session.user.id,
         name,
         llmProvider,
