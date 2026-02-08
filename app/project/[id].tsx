@@ -101,20 +101,49 @@ export default function ProjectDetailScreen() {
     try {
       const csvData = await authenticatedGetText(`/api/projects/${id}/export-csv`);
       
-      // Save CSV to file system
-      const fileUri = `${FileSystem.documentDirectory}project_${id}_export.csv`;
-      await FileSystem.writeAsStringAsync(fileUri, csvData);
-      
-      // Share the file
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri);
+      if (Platform.OS === 'web') {
+        // Web platform: Create a blob and trigger download
+        try {
+          const blob = new Blob([csvData], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `project_${id}_export.csv`;
+          link.style.display = 'none';
+          document.body.appendChild(link);
+          link.click();
+          
+          // Cleanup
+          setTimeout(() => {
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+          }, 100);
+          
+          setModal({
+            visible: true,
+            title: 'Export Complete',
+            message: 'CSV file has been downloaded',
+            type: 'success',
+          });
+        } catch (downloadError) {
+          throw new Error('Failed to trigger download: ' + (downloadError instanceof Error ? downloadError.message : 'Unknown error'));
+        }
       } else {
-        setModal({
-          visible: true,
-          title: 'Export Complete',
-          message: `CSV saved to: ${fileUri}`,
-          type: 'success',
-        });
+        // Mobile platforms: Use FileSystem and Sharing
+        const fileUri = `${FileSystem.documentDirectory}project_${id}_export.csv`;
+        await FileSystem.writeAsStringAsync(fileUri, csvData);
+        
+        // Share the file
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(fileUri);
+        } else {
+          setModal({
+            visible: true,
+            title: 'Export Complete',
+            message: `CSV saved to: ${fileUri}`,
+            type: 'success',
+          });
+        }
       }
     } catch (error) {
       console.error('[ProjectDetailScreen] Error exporting CSV:', error);
