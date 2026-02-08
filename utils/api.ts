@@ -86,7 +86,11 @@ export const apiCall = async <T = any>(
     }
 
     const data = responseType === 'text' ? await response.text() : await response.json();
-    console.log("[API] Success:", data);
+    if (responseType === 'text') {
+      console.log("[API] Success: Text response received, length:", (data as string).length);
+    } else {
+      console.log("[API] Success:", data);
+    }
     return data as T;
   } catch (error) {
     console.error("[API] Request failed:", error);
