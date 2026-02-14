@@ -219,7 +219,7 @@ export default function RecordingDetailScreen() {
           </View>
         )}
 
-        {/* Show retry button for failed recordings or pending recordings without audio */}}
+        {/* Show retry button for failed recordings or pending recordings without audio */}
         {(recording.status === 'error' || (recording.status === 'pending' && !recording.audioUrl)) && (
           <TouchableOpacity
             style={styles.retryButton}
