@@ -233,7 +233,6 @@ export default function ProjectDetailScreen() {
     drag,
   }: {
     item: Recording;
-    prog: SharedValue<number>;
     drag: SharedValue<number>;
   }) => {
     const styleAnimation = useAnimatedStyle(() => ({
@@ -266,8 +265,8 @@ export default function ProjectDetailScreen() {
         friction={2}
         enableTrackpadTwoFingerGesture
         rightThreshold={40}
-        renderRightActions={(prog, drag) => (
-          <RightAction item={item} prog={prog} drag={drag} />
+        renderRightActions={(_prog, drag) => (
+          <RightAction item={item} drag={drag} />
         )}
         overshootRight={false}
       >
