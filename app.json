@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Secure Scribe",
-    "slug": "secure-scribe",
-    "version": "1.0.1",
+    "name": "Safe Transcript",
+    "slug": "safe-transcript",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon-jyw.png",
     "userInterfaceStyle": "automatic",
@@ -39,7 +39,7 @@
       "expo-file-system",
       "react-native-executorch"
     ],
-    "scheme": "securescribe",
+    "scheme": "safetranscript",
     "experiments": {
       "typedRoutes": true
     },
