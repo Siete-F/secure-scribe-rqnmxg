@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Secure Scribe",
-    "slug": "Secure Scribe",
+    "slug": "secure-scribe",
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/images/app-icon-jyw.png",
@@ -39,13 +39,16 @@
       "expo-file-system",
       "react-native-executorch"
     ],
-    "scheme": "Secure Scribe",
+    "scheme": "securescribe",
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
       "router": {},
-      "backendUrl": "https://bh3h8uufh9h7q9yyhywusffreh7yfdxg.app.specular.dev"
+      "backendUrl": "https://bh3h8uufh9h7q9yyhywusffreh7yfdxg.app.specular.dev",
+      "eas": {
+        "projectId": "963ae7a0-1c83-4ef2-9388-037b25753bfd"
+      }
     }
   }
 }
