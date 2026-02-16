@@ -125,7 +125,7 @@ LLM Analysis            ──►  Structured output (summary, action items, etc
 
 | Layer | Technology |
 |---|---|
-| Mobile / Web | React Native, Expo, Expo Router |
+| Mobile / Web | React Native (0.81.x), Expo SDK 54, Expo Router |
 | Backend | Fastify, TypeScript |
 | Database | PostgreSQL (Neon), Drizzle ORM |
 | Auth | Better Auth (email/password + OAuth) |
@@ -142,7 +142,7 @@ LLM Analysis            ──►  Structured output (summary, action items, etc
 | `npm run dev` | Start Expo dev server with tunnel |
 | `npm run web` | Start web-only dev server |
 | `npm run lint` | Run ESLint |
-| `npm run build:web` | Export web build + generate service worker |
+| `npm run build:web` | Export web build |
 
 ### Backend
 

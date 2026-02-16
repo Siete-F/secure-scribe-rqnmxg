@@ -36,7 +36,8 @@
       "expo-font",
       "expo-router",
       "expo-web-browser",
-      "expo-file-system"
+      "expo-file-system",
+      "@react-native-community/datetimepicker"
     ],
     "scheme": "safetranscript",
     "experiments": {

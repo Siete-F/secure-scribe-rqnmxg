@@ -28,7 +28,7 @@ Secure Scribe is a privacy-focused audio transcription app. It records audio, tr
 
 | Area | Library |
 |---|---|
-| Navigation | `expo-router` |
+| Navigation | `expo-router` (sole router — do not add `react-router-dom` or standalone `@react-navigation/*` navigators) |
 | Auth | `better-auth`, `@better-auth/expo` |
 | Audio | `expo-audio` |
 | HTTP client | Fetch via `utils/api.ts` helpers |
@@ -37,6 +37,9 @@ Secure Scribe is a privacy-focused audio transcription app. It records audio, tr
 | Transcription SDK | `@mistralai/mistralai` |
 | On-device inference | `react-native-executorch` (mobile only) |
 | LLM SDKs | `openai`, `@google/generative-ai`, `@mistralai/mistralai` |
+| Maps (native) | WebView + Leaflet CDN (no npm map packages) |
+| Maps (web) | iframe + Leaflet CDN (no `react-leaflet` — it conflicts with React 19) |
+| Cross-platform scripts | `cross-env` (required for Windows compatibility) |
 
 ## Important Notes
 
@@ -45,3 +48,6 @@ Secure Scribe is a privacy-focused audio transcription app. It records audio, tr
 - Transcription lives in `backend/src/services/transcription.ts` (Batch API) and `hooks/useHybridTranscribe.ts` (unified hook). On mobile, the local Voxtral Mini 4B model (managed by `services/LocalModelManager.ts`) is used when downloaded; otherwise the Batch API is the fallback. Web always uses the Batch API. The app requires the React Native New Architecture (`newArchEnabled: true` in `app.json`) for ExecuTorch support; Expo Go does not work — use a Development Build (`npx expo run:ios` / `run:android`).
 - Auth routes under `/api/auth/*` are reserved by Better Auth. Custom auth endpoints use `/api/auth-status/*`.
 - Database migrations: after editing `backend/src/db/schema.ts`, run `cd backend && npm run db:push`.
+- **Do not add DOM-only or browser-only npm packages** (e.g., `leaflet`, `react-leaflet`, `react-router-dom`). They conflict with React Native and/or React 19. For web-specific functionality, use CDN resources loaded via WebView or iframe.
+- **Do not add `--force` or `--legacy-peer-deps`** to npm install commands. If a peer dependency conflict arises, resolve it by finding compatible versions or removing the conflicting package.
+- npm scripts use `cross-env` for environment variables to ensure Windows compatibility.
