@@ -5,9 +5,9 @@ import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
 import Constants from "expo-constants";
 
-const API_URL = "https://bh3h8uufh9h7q9yyhywusffreh7yfdxg.app.specular.dev";
+const API_URL = Constants.expoConfig?.extra?.backendUrl;
 
-export const BEARER_TOKEN_KEY = "secure-scribe_bearer_token";
+export const BEARER_TOKEN_KEY = "safetranscript_bearer_token";
 
 // Platform-specific storage: localStorage for web, SecureStore for native
 const storage = Platform.OS === "web"
@@ -46,8 +46,8 @@ export const authClient = createAuthClient({
   baseURL: API_URL,
   plugins: [
     expoClient({
-      scheme: "secure-scribe",
-      storagePrefix: "secure-scribe",
+      scheme: "safetranscript",
+      storagePrefix: "safetranscript",
       storage,
     }),
   ],
