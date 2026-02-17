@@ -130,23 +130,20 @@ export function registerProjectRoutes(app: App) {
         'Creating project'
       );
 
-      // Build insert values with all required fields
-      const insertValues = {
+      const insertValues: NewProject = {
         userId: session.user.id,
         name,
-        description: description ?? null,
         llmProvider,
         llmModel,
         llmPrompt,
         enableAnonymization: enableAnonymization ?? true,
-        customFields: customFields ?? null,
-        sensitiveWords: sensitiveWords ?? null,
       };
 
-      const [project] = await app.db
-        .insert(schema.projects)
-        .values(insertValues)
-        .returning();
+      if (description) insertValues.description = description;
+      if (customFields) insertValues.customFields = customFields;
+      if (sensitiveWords) insertValues.sensitiveWords = sensitiveWords;
+
+      const [project] = await app.db.insert(schema.projects).values(insertValues).returning();
 
       app.logger.info({ projectId: project.id }, 'Project created successfully');
       reply.status(201);
