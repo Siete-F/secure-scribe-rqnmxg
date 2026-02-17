@@ -76,7 +76,13 @@ npm install
 npm run dev          # Start Expo dev server
 ```
 
+To build the `apk` for android, run the following:
+```ps1
+npx eas-cli build -p android --profile preview
+```
+
 ### Backend
+you generally dont need this, this runs remotely and is updated every time you push.
 
 ```bash
 cd backend
