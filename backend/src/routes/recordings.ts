@@ -87,12 +87,11 @@ export function registerRecordingRoutes(app: App) {
         'Recordings fetched successfully'
       );
 
-      // Bypass fast-json-stringify by manually serializing the response
-      // The framework's serializer may strip properties when the response schema
-      // doesn't match the actual data shape
+      // Override the framework's serializer to prevent property stripping
+      // The framework auto-generates response schemas that may not include all fields
       return reply
-        .header('content-type', 'application/json')
-        .send(JSON.stringify(serialized));
+        .serializer(JSON.stringify)
+        .send(serialized);
     }
   );
 
@@ -214,7 +213,12 @@ export function registerRecordingRoutes(app: App) {
       }
 
       app.logger.info({ recordingId: id }, 'Recording details fetched successfully');
-      return recording;
+      const serialized = {
+        ...recording,
+        createdAt: recording.createdAt instanceof Date ? recording.createdAt.toISOString() : recording.createdAt,
+        updatedAt: recording.updatedAt instanceof Date ? recording.updatedAt.toISOString() : recording.updatedAt,
+      };
+      return reply.serializer(JSON.stringify).send(serialized);
     }
   );
 
