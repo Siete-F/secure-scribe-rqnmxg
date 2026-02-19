@@ -85,10 +85,11 @@ export function Modal({
             <TouchableOpacity
               style={[styles.button, styles.confirmButton]}
               onPress={() => {
-                if (onConfirm) {
+                if (isConfirm && onConfirm) {
                   onConfirm();
+                } else {
+                  onClose();
                 }
-                onClose();
               }}
               activeOpacity={0.7}
             >

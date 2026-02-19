@@ -13,10 +13,14 @@ import {
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { Project, Recording } from '@/types';
-import { authenticatedGet, authenticatedGetText, authenticatedDelete } from '@/utils/api';
+import { getProjectById } from '@/db/operations/projects';
+import { getRecordingsByProject, deleteRecording } from '@/db/operations/recordings';
+import { exportProjectCSV } from '@/db/operations/export';
+import { getAudioFileUri } from '@/services/audioStorage';
 import { Modal } from '@/components/ui/Modal';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -42,11 +46,51 @@ export default function ProjectDetailScreen() {
     type: 'info',
   });
   const [recordingToDelete, setRecordingToDelete] = useState<Recording | null>(null);
+  const [playingRecordingId, setPlayingRecordingId] = useState<string | null>(null);
+  const [playableAudioUrl, setPlayableAudioUrl] = useState('');
+
+  const audioPlayer = useAudioPlayer(playableAudioUrl);
+  const playerStatus = useAudioPlayerStatus(audioPlayer);
+
+  // Set local audio file URI when a recording is selected for playback
+  useEffect(() => {
+    if (!playingRecordingId) {
+      setPlayableAudioUrl('');
+      return;
+    }
+    const rec = recordings.find((r) => r.id === playingRecordingId);
+    if (rec?.audioPath) {
+      setPlayableAudioUrl(getAudioFileUri(rec.audioPath));
+    } else {
+      setPlayingRecordingId(null);
+    }
+  }, [playingRecordingId, recordings]);
+
+  // Auto-play when a new audio URL is loaded
+  useEffect(() => {
+    if (playableAudioUrl && audioPlayer) {
+      audioPlayer.play();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playableAudioUrl]);
+
+  const handlePlayPause = (recording: Recording) => {
+    if (!recording.audioPath || !recording.id) return;
+
+    if (playingRecordingId === recording.id) {
+      if (playerStatus?.playing) {
+        audioPlayer.pause();
+      } else {
+        audioPlayer.play();
+      }
+    } else {
+      setPlayingRecordingId(recording.id);
+    }
+  };
 
   const loadProject = useCallback(async () => {
     try {
-      console.log('[ProjectDetailScreen] Fetching project details from API');
-      const data = await authenticatedGet<Project>(`/api/projects/${id}`);
+      const data = await getProjectById(id!);
       setProject(data);
     } catch (error) {
       console.error('[ProjectDetailScreen] Error loading project:', error);
@@ -63,14 +107,7 @@ export default function ProjectDetailScreen() {
 
   const loadRecordings = useCallback(async () => {
     try {
-      console.log('[ProjectDetailScreen] Fetching recordings from API');
-      const data = await authenticatedGet<Recording[]>(`/api/projects/${id}/recordings`);
-      console.log('[ProjectDetailScreen] Raw recordings response:', JSON.stringify(data?.slice(0, 2), null, 2));
-      if (data?.length > 0) {
-        const sample = data[0];
-        console.log('[ProjectDetailScreen] First recording keys:', Object.keys(sample));
-        console.log('[ProjectDetailScreen] First recording id:', sample.id, 'status:', sample.status, 'createdAt:', sample.createdAt);
-      }
+      const data = await getRecordingsByProject(id!);
       setRecordings(data);
     } catch (error) {
       console.error('[ProjectDetailScreen] Error loading recordings:', error);
@@ -126,7 +163,7 @@ export default function ProjectDetailScreen() {
   const handleExportCSV = async () => {
     console.log('[ProjectDetailScreen] User tapped Export CSV button');
     try {
-      const csvData = await authenticatedGetText(`/api/projects/${id}/export-csv`);
+      const csvData = await exportProjectCSV(id!);
       
       if (Platform.OS === 'web') {
         // Web platform: Create a blob and trigger download
@@ -204,17 +241,21 @@ export default function ProjectDetailScreen() {
 
   const confirmDeleteRecording = async () => {
     if (!recordingToDelete) return;
+    const toDelete = recordingToDelete;
+    // Close the confirm modal immediately
+    setModal((prev) => ({ ...prev, visible: false }));
+    setRecordingToDelete(null);
     try {
-      if (recordingToDelete.id) {
-        await authenticatedDelete(`/api/recordings/${recordingToDelete.id}`);
+      if (toDelete.id) {
+        await deleteRecording(toDelete.id);
       }
       // Remove from local state regardless (handles recordings with undefined IDs)
       setRecordings((prev) => {
-        if (recordingToDelete.id) {
-          return prev.filter((r) => r.id !== recordingToDelete.id);
+        if (toDelete.id) {
+          return prev.filter((r) => r.id !== toDelete.id);
         }
         // For recordings without an ID, remove by reference equality
-        const idx = prev.indexOf(recordingToDelete);
+        const idx = prev.indexOf(toDelete);
         if (idx !== -1) {
           const next = [...prev];
           next.splice(idx, 1);
@@ -222,13 +263,12 @@ export default function ProjectDetailScreen() {
         }
         return prev;
       });
-      setRecordingToDelete(null);
     } catch (error) {
       console.error('[ProjectDetailScreen] Error deleting recording:', error);
       // Even if the API call fails, still remove from local state if the recording has no ID
-      if (!recordingToDelete.id) {
+      if (!toDelete.id) {
         setRecordings((prev) => {
-          const idx = prev.indexOf(recordingToDelete);
+          const idx = prev.indexOf(toDelete);
           if (idx !== -1) {
             const next = [...prev];
             next.splice(idx, 1);
@@ -236,7 +276,6 @@ export default function ProjectDetailScreen() {
           }
           return prev;
         });
-        setRecordingToDelete(null);
         return;
       }
       setModal({
@@ -310,7 +349,8 @@ export default function ProjectDetailScreen() {
     const statusLabel = getStatusLabel(item.status);
     const durationText = item.audioDuration ? formatDuration(item.audioDuration) : 'N/A';
     const dateText = item.createdAt ? new Date(item.createdAt).toLocaleDateString() : 'Unknown';
-    const needsAttention = item.status === 'error' || (item.status === 'pending' && !item.audioUrl);
+    const needsAttention = item.status === 'error' || (item.status === 'pending' && !item.audioPath);
+    const isThisPlaying = playingRecordingId === item.id && playerStatus?.playing;
 
     return (
       <TouchableOpacity
@@ -335,7 +375,10 @@ export default function ProjectDetailScreen() {
           <View style={styles.recordingHeaderRight}>
             {Platform.OS === 'web' && (
               <Pressable
-                onPress={() => handleDeleteRecording(item)}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  handleDeleteRecording(item);
+                }}
                 style={styles.webDeleteButton}
               >
                 <IconSymbol
@@ -351,6 +394,22 @@ export default function ProjectDetailScreen() {
         </View>
 
         <View style={styles.recordingMeta}>
+          {item.audioPath && item.id && (
+            <Pressable
+              onPress={(e) => {
+                e.stopPropagation();
+                handlePlayPause(item);
+              }}
+              style={styles.inlinePlayButton}
+            >
+              <IconSymbol
+                ios_icon_name={isThisPlaying ? 'pause.fill' : 'play.fill'}
+                android_material_icon_name={isThisPlaying ? 'pause' : 'play-arrow'}
+                size={18}
+                color="#FFFFFF"
+              />
+            </Pressable>
+          )}
           <View style={styles.metaItem}>
             <IconSymbol
               ios_icon_name="clock.fill"
@@ -367,8 +426,8 @@ export default function ProjectDetailScreen() {
             {item.llmOutput}
           </Text>
         )}
-        
-        {needsAttention && !item.audioUrl && (
+
+        {needsAttention && !item.audioPath && (
           <Text style={styles.recordingWarning}>
             Audio upload required
           </Text>
@@ -573,6 +632,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 8,
+  },
+  inlinePlayButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   metaItem: {
     flexDirection: 'row',

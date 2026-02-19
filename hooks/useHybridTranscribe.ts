@@ -2,7 +2,8 @@
 import { useState, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { checkModelExists, isLocalModelSupported, getModelPath } from '@/services/LocalModelManager';
-import { authenticatedPost } from '@/utils/api';
+import { getApiKeys } from '@/db/operations/apikeys';
+import { processTranscription } from '@/services/transcription';
 
 /**
  * Transcription result returned by the hybrid hook.
@@ -47,17 +48,17 @@ export const useHybridTranscribe = () => {
   }, []);
 
   /**
-   * Send audio to the backend Batch API for transcription.
+   * Transcribe audio via Mistral API directly from the device.
    */
-  const callBatchApi = async (
+  const callApiTranscription = async (
     audioUri: string,
-    recordingId: string,
   ): Promise<HybridTranscriptionResult> => {
-    const result = await authenticatedPost<{ transcription: string }>(
-      `/api/recordings/${recordingId}/transcribe`,
-      { audioUri },
-    );
-    return { text: result.transcription, source: 'api' };
+    const keys = await getApiKeys();
+    if (!keys.mistralKey) {
+      throw new Error('Mistral API key not configured. Add it in Settings.');
+    }
+    const result = await processTranscription(audioUri, keys.mistralKey);
+    return { text: result.fullText, source: 'api' };
   };
 
   /**
@@ -109,7 +110,7 @@ export const useHybridTranscribe = () => {
     ): Promise<HybridTranscriptionResult> => {
       // Web — always use the API
       if (Platform.OS === 'web' || forceApi || !isLocalReady) {
-        return callBatchApi(audioUri, recordingId);
+        return callApiTranscription(audioUri);
       }
 
       // Mobile — try local, fall back to API on failure
@@ -117,7 +118,7 @@ export const useHybridTranscribe = () => {
         return await callLocalModel(audioUri);
       } catch (error) {
         console.warn('[useHybridTranscribe] Local inference failed, falling back to API', error);
-        return callBatchApi(audioUri, recordingId);
+        return callApiTranscription(audioUri);
       }
     },
     [isLocalReady],

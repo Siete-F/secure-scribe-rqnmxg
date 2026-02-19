@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,17 +10,16 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { Project } from '@/types';
-import { authenticatedGet } from '@/utils/api';
+import { getAllProjects } from '@/db/operations/projects';
 import { Modal } from '@/components/ui/Modal';
-import { useAuth } from '@/contexts/AuthContext';
 
 export default function ProjectsScreen() {
   const router = useRouter();
-  const { user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -29,23 +28,10 @@ export default function ProjectsScreen() {
     message: '',
   });
 
-  useEffect(() => {
-    // Only load projects if user is authenticated
-    if (!user) {
-      console.log('[ProjectsScreen] No user, skipping project load');
-      setLoading(false);
-      return;
-    }
-    console.log('[ProjectsScreen] Loading projects');
-    loadProjects();
-  }, [user]);
-
-  const loadProjects = async () => {
+  const loadProjects = useCallback(async () => {
     try {
-      console.log('[ProjectsScreen] Fetching projects from API');
-      const data = await authenticatedGet<Project[]>('/api/projects');
+      const data = await getAllProjects();
       setProjects(data);
-      console.log('[ProjectsScreen] Loaded projects:', data.length);
     } catch (error) {
       console.error('[ProjectsScreen] Error loading projects:', error);
       setErrorModal({
@@ -56,21 +42,24 @@ export default function ProjectsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadProjects();
+    }, [loadProjects])
+  );
 
   const handleRefresh = () => {
-    console.log('ProjectsScreen: User triggered refresh');
     setRefreshing(true);
     loadProjects();
   };
 
   const handleCreateProject = () => {
-    console.log('ProjectsScreen: User tapped Create Project button');
     router.push('/project/create');
   };
 
   const handleProjectPress = (project: Project) => {
-    console.log('ProjectsScreen: User tapped project:', project.name);
     router.push(`/project/${project.id}`);
   };
 
@@ -103,7 +92,7 @@ export default function ProjectsScreen() {
             )}
           </View>
         </View>
-        
+
         <View style={styles.projectMeta}>
           <View style={styles.metaItem}>
             <IconSymbol

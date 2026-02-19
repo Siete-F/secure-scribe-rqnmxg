@@ -23,7 +23,7 @@ export interface Recording {
   id: string;
   projectId: string;
   status: 'pending' | 'transcribing' | 'anonymizing' | 'processing' | 'done' | 'error';
-  audioUrl?: string;
+  audioPath?: string;
   audioDuration?: number;
   customFieldValues: Record<string, any>;
   transcription?: string;

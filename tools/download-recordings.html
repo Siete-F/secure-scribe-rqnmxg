@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafeTranscript - Download Recordings</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; padding: 24px; }
+    h1 { margin-bottom: 8px; }
+    .subtitle { color: #666; margin-bottom: 24px; }
+    .card { background: #fff; border-radius: 12px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 14px; }
+    input[type="text"], input[type="password"] { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; margin-bottom: 12px; }
+    button { padding: 10px 20px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: #4A90D9; color: #fff; }
+    .btn-primary:hover { background: #3a7bc8; }
+    .btn-primary:disabled { background: #ccc; cursor: not-allowed; }
+    .btn-download { background: #34C759; color: #fff; font-size: 13px; padding: 6px 14px; }
+    .btn-download:hover { background: #2db84e; }
+    .btn-danger { background: #FF3B30; color: #fff; font-size: 13px; padding: 6px 14px; }
+    .status { padding: 10px; border-radius: 8px; margin-top: 12px; font-size: 14px; }
+    .status.error { background: #FFF0F0; color: #CC0000; border: 1px solid #FFCCCC; }
+    .status.success { background: #F0FFF0; color: #006600; border: 1px solid #CCFFCC; }
+    .status.info { background: #F0F4FF; color: #003399; border: 1px solid #CCE0FF; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th { text-align: left; padding: 10px 8px; border-bottom: 2px solid #eee; font-size: 13px; color: #666; }
+    td { padding: 10px 8px; border-bottom: 1px solid #f0f0f0; font-size: 14px; }
+    .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; color: #fff; }
+    .badge-pending { background: #FF9500; }
+    .badge-transcribing { background: #5856D6; }
+    .badge-anonymizing { background: #AF52DE; }
+    .badge-processing { background: #007AFF; }
+    .badge-done { background: #34C759; }
+    .badge-error { background: #FF3B30; }
+    .mono { font-family: 'SF Mono', Monaco, monospace; font-size: 12px; color: #666; }
+    .hidden { display: none; }
+    #recordings-section { margin-top: 24px; }
+    .actions { display: flex; gap: 8px; }
+    pre { background: #f8f8f8; padding: 12px; border-radius: 8px; overflow-x: auto; font-size: 12px; margin-top: 8px; max-height: 200px; overflow-y: auto; }
+  </style>
+</head>
+<body>
+  <h1>SafeTranscript - Download Recordings</h1>
+  <p class="subtitle">Retrieve and download audio recordings from your account</p>
+
+  <div class="card" id="auth-section">
+    <label for="backend-url">Backend URL</label>
+    <input type="text" id="backend-url" value="https://bh3h8uufh9h7q9yyhywusffreh7yfdxg.app.specular.dev" />
+
+    <label for="bearer-token">Bearer Token <span style="font-weight:400;color:#999">(from app logs or localStorage)</span></label>
+    <input type="password" id="bearer-token" placeholder="Paste your bearer token here" />
+
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button class="btn-primary" onclick="fetchRecordings()">Fetch Recordings</button>
+      <button class="btn-primary" style="background:#6c757d" onclick="fetchDebugList()">Fetch (Debug Endpoint)</button>
+      <button class="btn-primary" style="background:#8B5CF6" onclick="fetchSchema()">Show DB Schema</button>
+    </div>
+
+    <div id="auth-status"></div>
+  </div>
+
+  <div id="schema-section" class="hidden" style="margin-top:24px;">
+    <div class="card">
+      <h2 style="margin-bottom:12px;">Database Schema</h2>
+      <div id="schema-body"></div>
+    </div>
+  </div>
+
+  <div id="recordings-section" class="hidden">
+    <div class="card">
+      <h2 style="margin-bottom:4px;">Recordings</h2>
+      <p id="recordings-count" class="subtitle" style="margin-bottom:12px;"></p>
+
+      <div style="margin-bottom:12px;">
+        <button class="btn-primary" onclick="downloadAll()" id="download-all-btn">Download All Audio</button>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Project</th>
+              <th>Status</th>
+              <th>Audio</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="recordings-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-bottom:8px;">Raw Response</h2>
+      <pre id="raw-response"></pre>
+    </div>
+  </div>
+
+  <script>
+    function getBaseUrl() {
+      return document.getElementById('backend-url').value.replace(/\/+$/, '');
+    }
+
+    function getToken() {
+      return document.getElementById('bearer-token').value.trim();
+    }
+
+    function showStatus(elementId, message, type) {
+      const el = document.getElementById(elementId);
+      el.className = 'status ' + type;
+      el.textContent = message;
+      el.classList.remove('hidden');
+    }
+
+    async function apiFetch(endpoint) {
+      const base = getBaseUrl();
+      const token = getToken();
+
+      if (!token) {
+        showStatus('auth-status', 'Please enter a bearer token', 'error');
+        return null;
+      }
+
+      const resp = await fetch(`${base}${endpoint}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(`${resp.status} ${resp.statusText}: ${text}`);
+      }
+
+      return resp;
+    }
+
+    async function fetchRecordings() {
+      try {
+        showStatus('auth-status', 'Fetching projects...', 'info');
+
+        // First get projects
+        const projResp = await apiFetch('/api/projects');
+        const projects = await projResp.json();
+
+        if (!projects || projects.length === 0) {
+          showStatus('auth-status', 'No projects found for this account', 'error');
+          return;
+        }
+
+        showStatus('auth-status', `Found ${projects.length} project(s). Fetching recordings...`, 'info');
+
+        // Fetch recordings for each project
+        let allRecordings = [];
+        for (const proj of projects) {
+          const projId = proj.id;
+          const projName = proj.name || projId;
+          if (!projId) continue;
+
+          try {
+            const recResp = await apiFetch(`/api/projects/${projId}/recordings`);
+            const text = await recResp.text();
+            const recs = JSON.parse(text);
+
+            // Tag each recording with project info
+            for (const rec of recs) {
+              rec._projectName = projName;
+              rec._projectId = projId;
+            }
+            allRecordings.push(...recs);
+          } catch (e) {
+            console.warn(`Failed to fetch recordings for project ${projName}:`, e);
+          }
+        }
+
+        displayRecordings(allRecordings);
+      } catch (err) {
+        showStatus('auth-status', 'Error: ' + err.message, 'error');
+      }
+    }
+
+    async function fetchDebugList() {
+      try {
+        showStatus('auth-status', 'Fetching from debug endpoint...', 'info');
+        const resp = await apiFetch('/api/debug/recordings');
+        const recordings = await resp.json();
+        displayRecordings(recordings);
+      } catch (err) {
+        showStatus('auth-status', 'Debug endpoint error: ' + err.message, 'error');
+      }
+    }
+
+    async function fetchSchema() {
+      try {
+        showStatus('auth-status', 'Fetching database schema...', 'info');
+        const resp = await apiFetch('/api/debug/schema');
+        const rows = await resp.json();
+
+        // Group by table
+        const tables = {};
+        for (const row of rows) {
+          const t = row.table_name;
+          if (!tables[t]) tables[t] = [];
+          tables[t].push(row);
+        }
+
+        // Show schema section
+        document.getElementById('schema-section').classList.remove('hidden');
+        const container = document.getElementById('schema-body');
+        container.innerHTML = '';
+
+        for (const [tableName, columns] of Object.entries(tables)) {
+          const card = document.createElement('div');
+          card.style.marginBottom = '16px';
+          card.innerHTML = `<h3 style="margin-bottom:8px;color:#4A90D9;">${escapeHtml(tableName)}</h3>`;
+
+          const tbl = document.createElement('table');
+          tbl.innerHTML = `<thead><tr><th>Column</th><th>Type</th><th>Nullable</th><th>Default</th></tr></thead>`;
+          const tbody = document.createElement('tbody');
+          for (const col of columns) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td><strong>${escapeHtml(col.column_name)}</strong></td>
+              <td class="mono">${escapeHtml(col.data_type)}</td>
+              <td>${col.is_nullable === 'YES' ? 'Yes' : 'No'}</td>
+              <td class="mono" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(col.column_default || '—')}</td>
+            `;
+            tbody.appendChild(tr);
+          }
+          tbl.appendChild(tbody);
+          card.appendChild(tbl);
+          container.appendChild(card);
+        }
+
+        showStatus('auth-status', `Schema loaded: ${Object.keys(tables).length} table(s)`, 'success');
+      } catch (err) {
+        showStatus('auth-status', 'Schema endpoint error: ' + err.message, 'error');
+      }
+    }
+
+    function displayRecordings(recordings) {
+      // Check for empty objects
+      const nonEmpty = recordings.filter(r => Object.keys(r).length > 0);
+      const emptyCount = recordings.length - nonEmpty.length;
+
+      if (recordings.length === 0) {
+        showStatus('auth-status', 'No recordings found', 'info');
+        return;
+      }
+
+      if (emptyCount > 0 && nonEmpty.length === 0) {
+        showStatus('auth-status',
+          `Found ${recordings.length} recording(s) but ALL are empty objects (backend serialization bug). Try the "Debug Endpoint" button instead.`,
+          'error');
+      } else if (emptyCount > 0) {
+        showStatus('auth-status',
+          `Found ${recordings.length} recording(s), ${emptyCount} are empty objects. Showing ${nonEmpty.length} valid recording(s).`,
+          'info');
+      } else {
+        showStatus('auth-status', `Found ${nonEmpty.length} recording(s)`, 'success');
+      }
+
+      document.getElementById('recordings-section').classList.remove('hidden');
+      document.getElementById('recordings-count').textContent = `${nonEmpty.length} recording(s) with data`;
+      document.getElementById('raw-response').textContent = JSON.stringify(recordings, null, 2);
+
+      const tbody = document.getElementById('recordings-body');
+      tbody.innerHTML = '';
+
+      // Store for download-all
+      window._recordings = nonEmpty;
+
+      for (const rec of nonEmpty) {
+        const tr = document.createElement('tr');
+        const id = rec.id || '???';
+        const projectLabel = rec._projectName || rec.projectId || '—';
+        const status = rec.status || '—';
+        const hasAudio = !!rec.audioUrl;
+        const created = rec.createdAt ? new Date(rec.createdAt).toLocaleString() : '—';
+
+        tr.innerHTML = `
+          <td class="mono">${id.substring(0, 8)}...</td>
+          <td>${escapeHtml(projectLabel)}</td>
+          <td><span class="badge badge-${status}">${status}</span></td>
+          <td>${hasAudio ? 'Yes' : 'No'}</td>
+          <td>${created}</td>
+          <td class="actions">
+            ${rec.id && hasAudio ? `<button class="btn-download" onclick="downloadAudio('${rec.id}')">Download</button>` : ''}
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function downloadAudio(recordingId) {
+      try {
+        const base = getBaseUrl();
+        const token = getToken();
+
+        // The /audio endpoint redirects to a signed URL
+        const resp = await fetch(`${base}/api/recordings/${recordingId}/audio`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          redirect: 'follow',
+        });
+
+        if (!resp.ok) {
+          const text = await resp.text();
+          alert(`Download failed: ${resp.status} - ${text}`);
+          return;
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `recording-${recordingId}.wav`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert('Download error: ' + err.message);
+      }
+    }
+
+    async function downloadAll() {
+      const recs = window._recordings || [];
+      const downloadable = recs.filter(r => r.id && r.audioUrl);
+
+      if (downloadable.length === 0) {
+        alert('No recordings with audio to download');
+        return;
+      }
+
+      const btn = document.getElementById('download-all-btn');
+      btn.disabled = true;
+      btn.textContent = `Downloading 0/${downloadable.length}...`;
+
+      for (let i = 0; i < downloadable.length; i++) {
+        btn.textContent = `Downloading ${i + 1}/${downloadable.length}...`;
+        await downloadAudio(downloadable[i].id);
+        // Small delay between downloads
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'Download All Audio';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>

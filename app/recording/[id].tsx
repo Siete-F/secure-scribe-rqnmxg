@@ -16,7 +16,9 @@ import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { Recording } from '@/types';
 import * as Clipboard from 'expo-clipboard';
-import { authenticatedGet, authenticatedPost } from '@/utils/api';
+import { getRecordingById, deleteRecording } from '@/db/operations/recordings';
+import { runProcessingPipeline } from '@/services/processing';
+import { getAudioFileUri } from '@/services/audioStorage';
 import { Modal } from '@/components/ui/Modal';
 
 export default function RecordingDetailScreen() {
@@ -29,22 +31,23 @@ export default function RecordingDetailScreen() {
     visible: boolean;
     title: string;
     message: string;
-    type: 'success' | 'error' | 'info';
+    type: 'success' | 'error' | 'info' | 'confirm';
   }>({
     visible: false,
     title: '',
     message: '',
     type: 'info',
   });
+  const [audioUrl, setAudioUrl] = useState('');
+  const [showAnonymizedPayload, setShowAnonymizedPayload] = useState(false);
 
   // Always call hooks unconditionally
-  const audioPlayer = useAudioPlayer(recording?.audioUrl || '');
+  const audioPlayer = useAudioPlayer(audioUrl);
   const playerStatus = useAudioPlayerStatus(audioPlayer);
 
   const loadRecording = useCallback(async () => {
     try {
-      console.log('[RecordingDetailScreen] Fetching recording details from API');
-      const data = await authenticatedGet<Recording>(`/api/recordings/${id}`);
+      const data = await getRecordingById(id!);
       setRecording(data);
     } catch (error) {
       console.error('[RecordingDetailScreen] Error loading recording:', error);
@@ -64,8 +67,15 @@ export default function RecordingDetailScreen() {
     loadRecording();
   }, [id, loadRecording]);
 
+  // Set local audio file URI for playback
+  useEffect(() => {
+    if (recording?.audioPath) {
+      setAudioUrl(getAudioFileUri(recording.audioPath));
+    }
+  }, [recording?.audioPath]);
+
   const handlePlayPause = () => {
-    if (!audioPlayer || !recording?.audioUrl) {
+    if (!audioPlayer || !recording?.audioPath) {
       return;
     }
 
@@ -74,6 +84,32 @@ export default function RecordingDetailScreen() {
       audioPlayer.pause();
     } else {
       audioPlayer.play();
+    }
+  };
+
+  const handleDelete = () => {
+    setModal({
+      visible: true,
+      title: 'Delete Recording',
+      message: 'Are you sure you want to delete this recording? This cannot be undone.',
+      type: 'confirm',
+    });
+  };
+
+  const confirmDelete = async () => {
+    if (!recording) return;
+    setModal((prev) => ({ ...prev, visible: false }));
+    try {
+      await deleteRecording(recording.id);
+      router.back();
+    } catch (error) {
+      console.error('[RecordingDetailScreen] Error deleting recording:', error);
+      setModal({
+        visible: true,
+        title: 'Error',
+        message: error instanceof Error ? error.message : 'Failed to delete recording',
+        type: 'error',
+      });
     }
   };
 
@@ -99,8 +135,8 @@ export default function RecordingDetailScreen() {
 
     setRetrying(true);
     try {
-      console.log('[RecordingDetailScreen] User triggered retry transcription');
-      await authenticatedPost(`/api/recordings/${recording.id}/transcribe`, {});
+      console.log('[RecordingDetailScreen] User triggered retry processing');
+      runProcessingPipeline(recording.id, recording.projectId).catch(console.error);
       
       setModal({
         visible: true,
@@ -124,6 +160,41 @@ export default function RecordingDetailScreen() {
     } finally {
       setRetrying(false);
     }
+  };
+
+  /** Render transcription text with detected PII values shown in bold */
+  const renderTranscriptionWithPII = (text: string, piiMappings?: Record<string, string>) => {
+    if (!piiMappings || Object.keys(piiMappings).length === 0) {
+      return <Text style={styles.transcriptionText}>{text}</Text>;
+    }
+
+    // Collect all original PII values and sort by length (longest first to avoid partial matches)
+    const piiValues = Object.values(piiMappings)
+      .filter((v) => v.length > 0)
+      .sort((a, b) => b.length - a.length);
+
+    if (piiValues.length === 0) {
+      return <Text style={styles.transcriptionText}>{text}</Text>;
+    }
+
+    // Build a regex that matches any PII value
+    const escaped = piiValues.map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const pattern = new RegExp(`(${escaped.join('|')})`, 'gi');
+    const parts = text.split(pattern);
+
+    const piiSet = new Set(piiValues.map((v) => v.toLowerCase()));
+
+    return (
+      <Text style={styles.transcriptionText}>
+        {parts.map((part, i) =>
+          piiSet.has(part.toLowerCase()) ? (
+            <Text key={i} style={styles.piiHighlight}>{part}</Text>
+          ) : (
+            <Text key={i}>{part}</Text>
+          )
+        )}
+      </Text>
+    );
   };
 
   const getStatusColor = (status: Recording['status']) => {
@@ -179,15 +250,16 @@ export default function RecordingDetailScreen() {
   const statusLabel = getStatusLabel(recording.status);
   const isPlaying = playerStatus?.playing || false;
   const currentTime = playerStatus?.currentTime || 0;
-  const duration = playerStatus?.duration || recording.audioDuration || 0;
+  const rawDuration = playerStatus?.duration;
+  const duration = (rawDuration && isFinite(rawDuration) && rawDuration > 0) ? rawDuration : (recording.audioDuration || 0);
   const currentTimeDisplay = formatTime(currentTime);
   const durationDisplay = formatTime(duration);
   
   // Check if recording needs attention (error or pending without audio)
   const hasError = recording.status === 'error';
-  const missingAudio = recording.status === 'pending' && !recording.audioUrl;
+  const missingAudio = recording.status === 'pending' && !recording.audioPath;
   const needsAttention = hasError || missingAudio;
-  const canRetry = hasError && recording.audioUrl; // Only allow retry for errors with audio
+  const canRetry = hasError && recording.audioPath; // Only allow retry for errors with audio
 
   return (
     <SafeAreaView style={commonStyles.container} edges={['top']}>
@@ -268,7 +340,7 @@ export default function RecordingDetailScreen() {
           </View>
         )}
 
-        {recording.audioUrl && (
+        {(recording.audioPath || audioUrl) && (
           <View style={styles.playerCard}>
             <Text style={styles.sectionTitle}>Audio Playback</Text>
             <View style={styles.playerControls}>
@@ -295,8 +367,31 @@ export default function RecordingDetailScreen() {
 
         {recording.transcription && (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Transcription</Text>
-            <Text style={styles.transcriptionText}>{recording.transcription}</Text>
+            <View style={styles.outputHeader}>
+              <Text style={styles.sectionTitle}>Transcription</Text>
+              {recording.anonymizedTranscription && (
+                <TouchableOpacity
+                  style={[styles.payloadButton, showAnonymizedPayload && styles.payloadButtonActive]}
+                  onPress={() => setShowAnonymizedPayload(!showAnonymizedPayload)}
+                  activeOpacity={0.7}
+                >
+                  <IconSymbol
+                    ios_icon_name="eye.fill"
+                    android_material_icon_name="visibility"
+                    size={18}
+                    color={showAnonymizedPayload ? colors.card : colors.primary}
+                  />
+                </TouchableOpacity>
+              )}
+            </View>
+            {showAnonymizedPayload && recording.anonymizedTranscription ? (
+              <>
+                <Text style={styles.payloadLabel}>Anonymized payload sent to LLM:</Text>
+                <Text style={styles.anonymizedText}>{recording.anonymizedTranscription}</Text>
+              </>
+            ) : (
+              renderTranscriptionWithPII(recording.transcription, recording.piiMappings)
+            )}
           </View>
         )}
 
@@ -332,6 +427,20 @@ export default function RecordingDetailScreen() {
             ))}
           </View>
         )}
+
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={handleDelete}
+          activeOpacity={0.7}
+        >
+          <IconSymbol
+            ios_icon_name="trash.fill"
+            android_material_icon_name="delete"
+            size={20}
+            color="#FFFFFF"
+          />
+          <Text style={styles.deleteButtonText}>Delete Recording</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <Modal
@@ -340,6 +449,8 @@ export default function RecordingDetailScreen() {
         message={modal.message}
         type={modal.type}
         onClose={() => setModal({ ...modal, visible: false })}
+        onConfirm={modal.type === 'confirm' ? confirmDelete : undefined}
+        confirmText={modal.type === 'confirm' ? 'Delete' : 'OK'}
       />
     </SafeAreaView>
   );
@@ -452,6 +563,38 @@ const styles = StyleSheet.create({
     color: colors.text,
     lineHeight: 22,
   },
+  piiHighlight: {
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  payloadButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    backgroundColor: `${colors.primary}15`,
+  },
+  payloadButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  payloadLabel: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: colors.textSecondary,
+    marginBottom: 8,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  },
+  anonymizedText: {
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 22,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    backgroundColor: `${colors.border}40`,
+    padding: 12,
+    borderRadius: 8,
+  },
   outputHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -558,5 +701,20 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.card,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.statusError,
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    gap: 8,
+  },
+  deleteButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
 });

@@ -21,41 +21,11 @@ import {
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { Project } from '@/types';
-import { authenticatedGet, authenticatedPost, BACKEND_URL } from '@/utils/api';
+import { getProjectById } from '@/db/operations/projects';
+import { createRecording, updateRecording } from '@/db/operations/recordings';
+import { saveAudioFile } from '@/services/audioStorage';
+import { runProcessingPipeline } from '@/services/processing';
 import { Modal } from '@/components/ui/Modal';
-import { getBearerToken } from '@/utils/api';
-
-/**
- * Allowed audio file extensions for recording uploads.
- * These formats are supported by the expo-audio recorder and the backend transcription service.
- * Note: The backend accepts any audio format and converts it as needed for transcription.
- */
-const ALLOWED_AUDIO_EXTENSIONS = ['m4a', 'mp3', 'wav', 'caf', 'aac'];
-
-/**
- * Extract and validate file extension from audio URI.
- * Falls back to 'm4a' (the default expo-audio format) if the extension is unrecognized.
- * This is safe because the backend accepts and converts any audio format.
- * 
- * @param uri The audio file URI
- * @returns Validated file extension, defaults to 'm4a' if invalid
- */
-function extractFileExtension(uri: string): string {
-  // Remove query parameters if present
-  const uriWithoutQuery = uri.split('?')[0];
-  const lastDotIndex = uriWithoutQuery.lastIndexOf('.');
-  const rawExtension = lastDotIndex > -1 ? uriWithoutQuery.substring(lastDotIndex + 1) : '';
-  const normalizedExtension = rawExtension.toLowerCase();
-  
-  // Validate against whitelist
-  if (ALLOWED_AUDIO_EXTENSIONS.includes(normalizedExtension)) {
-    return normalizedExtension;
-  }
-  
-  // Log fallback for debugging - m4a is the default format from expo-audio recorder
-  console.warn('[extractFileExtension] Unrecognized file extension, falling back to m4a. Original URI:', uri);
-  return 'm4a';
-}
 
 export default function NewRecordingScreen() {
   const router = useRouter();
@@ -63,7 +33,7 @@ export default function NewRecordingScreen() {
   const [project, setProject] = useState<Project | null>(null);
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
   const [hasPermission, setHasPermission] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [modal, setModal] = useState<{
     visible: boolean;
     title: string;
@@ -81,12 +51,11 @@ export default function NewRecordingScreen() {
 
   const loadProject = useCallback(async () => {
     try {
-      console.log('[NewRecordingScreen] Loading project details');
-      const data = await authenticatedGet<Project>(`/api/projects/${projectId}`);
+      const data = await getProjectById(projectId!);
       setProject(data);
 
       const initialValues: Record<string, any> = {};
-      if (data.customFields && Array.isArray(data.customFields)) {
+      if (data?.customFields && Array.isArray(data.customFields)) {
         data.customFields.forEach((field) => {
           initialValues[field.name] = '';
         });
@@ -104,14 +73,12 @@ export default function NewRecordingScreen() {
   }, [projectId]);
 
   useEffect(() => {
-    console.log('[NewRecordingScreen] Initializing for project:', projectId);
     requestPermissions();
     loadProject();
   }, [projectId, loadProject]);
 
   const requestPermissions = async () => {
     try {
-      console.log('[NewRecordingScreen] Requesting microphone permissions');
       const status = await AudioModule.requestRecordingPermissionsAsync();
       if (!status.granted) {
         setModal({
@@ -129,7 +96,6 @@ export default function NewRecordingScreen() {
         playsInSilentMode: true,
         allowsRecording: true,
       });
-      console.log('[NewRecordingScreen] Permissions granted');
     } catch (error) {
       console.error('[NewRecordingScreen] Error requesting permissions:', error);
     }
@@ -147,7 +113,6 @@ export default function NewRecordingScreen() {
     }
 
     try {
-      console.log('[NewRecordingScreen] User started recording');
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
     } catch (error) {
@@ -163,11 +128,9 @@ export default function NewRecordingScreen() {
 
   const handleStopRecording = async () => {
     try {
-      console.log('[NewRecordingScreen] User stopped recording');
       await audioRecorder.stop();
       const uri = audioRecorder.uri;
       console.log('[NewRecordingScreen] Recording saved to:', uri);
-
       handleSaveRecording(uri);
     } catch (error) {
       console.error('[NewRecordingScreen] Error stopping recording:', error);
@@ -182,110 +145,52 @@ export default function NewRecordingScreen() {
 
   const handleSaveRecording = async (audioUri: string | null) => {
     if (!audioUri) {
-      setModal({
-        visible: true,
-        title: 'Error',
-        message: 'No audio recorded',
-        type: 'error',
-      });
+      setModal({ visible: true, title: 'Error', message: 'No audio recorded', type: 'error' });
       return;
     }
 
-    setIsUploading(true);
-    let recordingId: string | null = null;
-    
+    setIsProcessing(true);
+
     try {
-      console.log('[NewRecordingScreen] Creating recording record');
-      const createResponse = await authenticatedPost<{ id: string; uploadUrl?: string }>(
-        `/api/projects/${projectId}/recordings`,
-        { customFieldValues }
-      );
-      recordingId = createResponse.id;
+      // 1. Create recording in local DB
+      const recording = await createRecording(projectId!, customFieldValues);
+      console.log('[NewRecordingScreen] Created recording:', recording.id);
 
-      console.log('[NewRecordingScreen] Uploading audio file to recording:', recordingId);
-      console.log('[NewRecordingScreen] Audio URI:', audioUri);
-      
-      // Upload audio file using multipart form data
-      const formData = new FormData();
-      
-      // Get file extension for proper MIME type
-      const fileExtension = extractFileExtension(audioUri);
-      const mimeType = `audio/${fileExtension}`;
-      
-      if (Platform.OS === 'web') {
-        // On web, we need to fetch the file and create a proper Blob
-        try {
-          const response = await fetch(audioUri);
-          const blob = await response.blob();
-          formData.append('audio', blob, `recording.${fileExtension}`);
-        } catch (fetchError) {
-          console.error('[NewRecordingScreen] Failed to fetch audio file on web:', fetchError);
-          throw new Error('Failed to read audio file');
-        }
-      } else {
-        // On native platforms (iOS/Android), React Native FormData handles file URIs
-        formData.append('audio', {
-          uri: audioUri,
-          type: mimeType,
-          name: `recording.${fileExtension}`,
-        } as any);
-      }
+      // 2. Save audio file to persistent local storage
+      const audioPath = await saveAudioFile(recording.id, audioUri);
+      console.log('[NewRecordingScreen] Audio saved to:', audioPath);
 
-      const token = await getBearerToken();
-      const uploadResponse = await fetch(
-        `${BACKEND_URL}/api/recordings/${recordingId}/upload-audio`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            // Don't set Content-Type - FormData will automatically set it with the
-            // correct multipart/form-data boundary parameter
-          },
-          body: formData,
-        }
-      );
+      // 3. Update recording with the audio path
+      await updateRecording(recording.id, {
+        audioPath,
+        audioDuration: Math.round(currentTime),
+      });
 
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        console.error('[NewRecordingScreen] Upload failed with status:', uploadResponse.status, errorText);
-        throw new Error(`Failed to upload audio file: ${uploadResponse.status} - ${errorText}`);
-      }
+      // 4. Start the processing pipeline (fire and forget)
+      runProcessingPipeline(recording.id, projectId!).catch((err) => {
+        console.error('[NewRecordingScreen] Pipeline error:', err);
+      });
 
-      console.log('[NewRecordingScreen] Upload successful');
       setModal({
         visible: true,
         title: 'Success',
         message: 'Recording saved and processing started',
         type: 'success',
       });
-      
+
       setTimeout(() => {
         router.back();
       }, 1500);
     } catch (error) {
       console.error('[NewRecordingScreen] Error saving recording:', error);
-      
-      // If recording was created but upload failed, user can retry later
-      const errorMessage = error instanceof Error ? error.message : 'Failed to save recording';
-      const userMessage = recordingId 
-        ? `${errorMessage}. The recording was saved but you'll need to retry uploading the audio.`
-        : errorMessage;
-      
       setModal({
         visible: true,
         title: 'Error',
-        message: userMessage,
+        message: error instanceof Error ? error.message : 'Failed to save recording',
         type: 'error',
       });
-      
-      // Still navigate back if recording was created, so user can see it and retry
-      if (recordingId) {
-        setTimeout(() => {
-          router.back();
-        }, 3000);
-      }
     } finally {
-      setIsUploading(false);
+      setIsProcessing(false);
     }
   };
 
@@ -305,7 +210,7 @@ export default function NewRecordingScreen() {
   };
 
   const isRecording = recorderState.isRecording;
-  const currentTime = (recorderState.durationMillis || 0) / 1000; // Convert milliseconds to seconds
+  const currentTime = (recorderState.durationMillis || 0) / 1000;
   const timeDisplay = formatTime(currentTime);
 
   return (
@@ -362,7 +267,7 @@ export default function NewRecordingScreen() {
                 isRecording && styles.recordButtonActive,
               ]}
               onPress={isRecording ? handleStopRecording : handleStartRecording}
-              disabled={isUploading}
+              disabled={isProcessing}
               activeOpacity={0.7}
             >
               <IconSymbol
@@ -379,9 +284,9 @@ export default function NewRecordingScreen() {
           </View>
         </View>
 
-        {isUploading && (
+        {isProcessing && (
           <View style={styles.uploadingContainer}>
-            <Text style={styles.uploadingText}>Uploading and processing...</Text>
+            <Text style={styles.uploadingText}>Saving and processing...</Text>
           </View>
         )}
       </ScrollView>

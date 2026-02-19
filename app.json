@@ -38,7 +38,8 @@
       "expo-web-browser",
       "expo-file-system",
       "@react-native-community/datetimepicker",
-      "expo-asset"
+      "expo-asset",
+      "expo-sqlite"
     ],
     "scheme": "safetranscript",
     "experiments": {
@@ -46,7 +47,6 @@
     },
     "extra": {
       "router": {},
-      "backendUrl": "https://bh3h8uufh9h7q9yyhywusffreh7yfdxg.app.specular.dev",
       "eas": {
         "projectId": "963ae7a0-1c83-4ef2-9388-037b25753bfd"
       }

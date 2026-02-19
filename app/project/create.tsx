@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { LLM_PROVIDERS, CustomField } from '@/types';
-import { authenticatedPost } from '@/utils/api';
+import { createProject } from '@/db/operations/projects';
 import { Modal } from '@/components/ui/Modal';
 
 export default function CreateProjectScreen() {
@@ -80,7 +80,7 @@ export default function CreateProjectScreen() {
         sensitiveWords: parsedSensitiveWords.length > 0 ? parsedSensitiveWords : undefined,
       };
       
-      await authenticatedPost('/api/projects', projectData);
+      await createProject(projectData);
 
       setModal({
         visible: true,
