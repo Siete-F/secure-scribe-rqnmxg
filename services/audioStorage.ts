@@ -71,10 +71,3 @@ export async function deleteAudioFile(audioPath: string): Promise<void> {
     console.warn(`[AudioStorage] Failed to delete ${audioPath}:`, error);
   }
 }
-
-function getExtension(uri: string): string {
-  const supported = ['m4a', 'mp3', 'wav', 'caf', 'aac'];
-  const match = uri.match(/\.(\w+)(?:\?.*)?$/);
-  const ext = match?.[1]?.toLowerCase();
-  return ext && supported.includes(ext) ? ext : 'm4a';
-}

@@ -80,7 +80,7 @@ const getLogServerUrl = (): string | null => {
         }
       }
     }
-  } catch (e) {
+  } catch (_e) {
     // Silently fail
   }
 
@@ -121,7 +121,7 @@ const flushLogs = async () => {
           }
         }
       });
-    } catch (e) {
+    } catch (_e) {
       // Silently ignore sync errors
     }
   }
@@ -176,43 +176,9 @@ const sendErrorToParent = (level: string, message: string, data: any) => {
         source: 'expo-template'
       }, '*');
     }
-  } catch (error) {
+  } catch (_error) {
     // Silently fail
   }
-};
-
-// Function to extract meaningful source location from stack trace
-const extractSourceLocation = (stack: string): string => {
-  if (!stack) return '';
-
-  // Look for various patterns in the stack trace
-  const patterns = [
-    // Pattern for app files: app/filename.tsx:line:column
-    /at .+\/(app\/[^:)]+):(\d+):(\d+)/,
-    // Pattern for components: components/filename.tsx:line:column
-    /at .+\/(components\/[^:)]+):(\d+):(\d+)/,
-    // Pattern for any .tsx/.ts files
-    /at .+\/([^/]+\.tsx?):(\d+):(\d+)/,
-    // Pattern for bundle files with source maps
-    /at .+\/([^/]+\.bundle[^:]*):(\d+):(\d+)/,
-    // Pattern for any JavaScript file
-    /at .+\/([^/\s:)]+\.[jt]sx?):(\d+):(\d+)/
-  ];
-
-  for (const pattern of patterns) {
-    const match = stack.match(pattern);
-    if (match) {
-      return `${match[1]}:${match[2]}:${match[3]}`;
-    }
-  }
-
-  // If no specific pattern matches, try to find any file reference
-  const fileMatch = stack.match(/at .+\/([^/\s:)]+\.[jt]sx?):(\d+)/);
-  if (fileMatch) {
-    return `${fileMatch[1]}:${fileMatch[2]}`;
-  }
-
-  return '';
 };
 
 // Function to get caller information from stack trace

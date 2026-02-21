@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -250,7 +250,6 @@ export default function RecordingDetailScreen() {
   // Check if recording needs attention (error or pending without audio)
   const hasError = recording.status === 'error';
   const missingAudio = recording.status === 'pending' && !recording.audioPath;
-  const needsAttention = hasError || missingAudio;
   const canRetry = hasError && recording.audioPath; // Only allow retry for errors with audio
 
   return (

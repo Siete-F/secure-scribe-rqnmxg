@@ -3,7 +3,7 @@ import { StyleProp, ViewStyle } from "react-native";
 
 export function IconSymbol({
   ios_icon_name,
-  android_material_icon_name,
+  android_material_icon_name: _android_material_icon_name,
   size = 24,
   color,
   style,

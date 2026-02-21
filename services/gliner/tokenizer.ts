@@ -4,7 +4,7 @@
  * Adapted for GLiNER's word-by-word tokenization pattern.
  */
 
-import type { TokenizerData } from './types';
+
 
 let _tokenizer: BPETokenizer | null = null;
 
@@ -71,14 +71,6 @@ function buildByteEncoder(): Map<number, string> {
     encoder.set(bs[i], String.fromCharCode(cs[i]));
   }
   return encoder;
-}
-
-function buildByteDecoder(encoder: Map<number, string>): Map<string, number> {
-  const decoder = new Map<string, number>();
-  for (const [k, v] of encoder) {
-    decoder.set(v, k);
-  }
-  return decoder;
 }
 
 // --- BPE Tokenizer ---

@@ -22,25 +22,29 @@ module.exports = {
     browser: true,
   },
   rules: {
-    "@typescript-eslint/no-unused-vars": "off",
+    "@typescript-eslint/no-unused-vars": ["warn", {
+      "argsIgnorePattern": "^_",
+      "varsIgnorePattern": "^_",
+      "caughtErrorsIgnorePattern": "^_"
+    }],
     "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/prefer-as-const": "off",
+    "@typescript-eslint/prefer-as-const": "warn",
     "@typescript-eslint/no-var-requires": "off",
     "react/react-in-jsx-scope": "off",
     "@typescript-eslint/no-empty-object-type": "off",
     "@typescript-eslint/no-wrapper-object-types": "off",
-    "@typescript-eslint/ban-tslint-comment": "off",
+    "@typescript-eslint/ban-tslint-comment": "warn",
     "react/no-unescaped-entities": "off",
     "import/no-unresolved": "off",
     "import/namespace": "off",
-    "prefer-const": "off",
-    "react/prop-types": 1,
-    "no-case-declarations": "off",
-    "no-empty": "off",
+    "prefer-const": "warn",
+    "react/prop-types": "off",
+    "no-case-declarations": "warn",
+    "no-empty": ["warn", { "allowEmptyCatch": true }],
     "react/display-name": "off",
-    "no-constant-condition": "off",
-    "no-var": "off",
-    "no-useless-escape": "off"
+    "no-constant-condition": "warn",
+    "no-var": "warn",
+    "no-useless-escape": "warn"
   },
   settings: {
     'import/resolver': {

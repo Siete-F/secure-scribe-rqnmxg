@@ -1,6 +1,5 @@
 // This file is a fallback for using MaterialIcons on Android and web.
 
-import React from "react";
 import { SymbolWeight } from "expo-symbols";
 import {
   OpaqueColorValue,
@@ -16,7 +15,7 @@ import MaterialIcons from "@expo/vector-icons/MaterialIcons";
  * Icon `name`s are based on SFSymbols and require manual mapping to MaterialIcons.
  */
 export function IconSymbol({
-  ios_icon_name = undefined,
+  ios_icon_name: _ios_icon_name = undefined,
   android_material_icon_name,
   size = 24,
   color,

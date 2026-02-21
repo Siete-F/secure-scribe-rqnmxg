@@ -4,7 +4,7 @@
  */
 
 import * as FileSystem from 'expo-file-system';
-import { MODEL_FILES, MODEL_SIZE_MB } from './config';
+import { MODEL_FILES } from './config';
 
 const MODEL_DIR = `${FileSystem.documentDirectory}gliner-pii/`;
 

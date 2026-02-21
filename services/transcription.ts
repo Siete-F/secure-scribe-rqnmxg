@@ -3,7 +3,6 @@
  * Calls Mistral Voxtral API directly from the device using raw fetch.
  * Handles reading local audio files and sending them as multipart form data.
  */
-import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 
 export interface TranscriptionSegment {

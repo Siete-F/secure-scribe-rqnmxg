@@ -1,4 +1,3 @@
-import type { Recording } from '@/types';
 import { getRecordingsByProject } from './recordings';
 import { getProjectById } from './projects';
 
@@ -6,7 +5,6 @@ import { getProjectById } from './projects';
 export async function exportProjectCSV(projectId: string): Promise<string> {
   const recordings = await getRecordingsByProject(projectId);
   const doneRecordings = recordings.filter((r) => r.status === 'done');
-  const project = await getProjectById(projectId);
 
   // Get unique custom field names
   const customFieldNames = new Set<string>();
