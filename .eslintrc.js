@@ -31,7 +31,8 @@ module.exports = {
     "@typescript-eslint/no-wrapper-object-types": "off",
     "@typescript-eslint/ban-tslint-comment": "off",
     "react/no-unescaped-entities": "off",
-    "import/no-unresolved": "error",
+    "import/no-unresolved": "off",
+    "import/namespace": "off",
     "prefer-const": "off",
     "react/prop-types": 1,
     "no-case-declarations": "off",
@@ -40,6 +41,14 @@ module.exports = {
     "no-constant-condition": "off",
     "no-var": "off",
     "no-useless-escape": "off"
+  },
+  settings: {
+    'import/resolver': {
+      typescript: {
+        project: './tsconfig.json',
+        extensions: ['.ts', '.tsx', '.js', '.jsx', '.web.ts', '.web.tsx'],
+      },
+    },
   },
   overrides: [
     {

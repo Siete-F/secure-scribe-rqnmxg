@@ -1,6 +1,3 @@
-import { eq } from 'drizzle-orm';
-import { db } from '../client';
-import * as schema from '../schema';
 import type { Recording } from '@/types';
 import { getRecordingsByProject } from './recordings';
 import { getProjectById } from './projects';

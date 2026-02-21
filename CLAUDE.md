@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Safe Transcript is a privacy-focused audio transcription app built with React Native (Expo). It records audio, transcribes it via Mistral Voxtral, anonymizes PII, and processes cleaned transcripts with a configurable LLM. The app is fully local — all data is stored on-device in SQLite, audio files are saved to local filesystem, and external API calls (transcription, LLM) are made directly from the device using user-provided API keys.
+Safe Transcript is a privacy-focused audio transcription app built with React Native (Expo). It records audio, transcribes it via Mistral Voxtral, anonymizes PII, and processes cleaned transcripts with a configurable LLM. The app is fully local — on iOS/Android, projects and recordings are stored as plain files (markdown, text, JSON) in a configurable folder structure; on web, data is stored in SQLite (sql.js). API keys and app settings remain in SQLite on all platforms. External API calls (transcription, LLM) are made directly from the device using user-provided API keys.
 
 ## Commands
 
@@ -27,19 +27,32 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - No authentication — single-user local app
 - On-device transcription via `react-native-executorch` managed by `services/LocalModelManager.ts` and `hooks/useHybridTranscribe.ts`
 
-**Database:** SQLite via `expo-sqlite` + Drizzle ORM (`drizzle-orm/expo-sqlite`)
-- Schema in `db/schema.ts` — three tables: `projects`, `recordings`, `apiKeys`
-- Database client in `db/client.ts` — initializes on app launch
-- CRUD operations in `db/operations/` (projects, recordings, apikeys, export)
-- JSON fields stored as TEXT with JSON.stringify/parse in the operations layer
-- Timestamps stored as ISO strings, UUIDs as TEXT
+**Storage (iOS/Android) — file-based:**
+- Projects and recordings stored as plain files in a configurable folder structure
+- `services/fileStorage.ts` — core file I/O service (read/write JSON, text, audio)
+- `db/operations/projects.ts` — project CRUD via folder + `config.json`
+- `db/operations/recordings.ts` — recording CRUD via timestamp-named files
+- Project ID = folder slug (e.g. `my-project`); Recording ID = `"{folder}::{timestamp}"`
+- Storage root configurable via `settings` table in SQLite, default: `documentDirectory/SafeTranscript/`
+
+**Storage (Web) — SQLite:**
+- Web builds use `.web.ts` platform files that preserve the original SQLite-based operations
+- `db/operations/projects.web.ts`, `db/operations/recordings.web.ts` — SQLite CRUD via sql.js
+- `services/fileStorage.web.ts` — stub (web has no real filesystem)
+
+**Database (all platforms):** SQLite via `expo-sqlite` + Drizzle ORM
+- Schema in `db/schema.ts` — tables: `projects`, `recordings` (web only), `api_keys`, `settings`
+- `settings` table stores key/value pairs (e.g. `storage_root`)
+- `api_keys` table stores LLM API keys (kept in SQLite for privacy)
+- Database client in `db/client.ts` (native) / `db/client.web.ts` (web)
 
 **Services (run on-device):**
 - `services/transcription.ts` — Mistral Voxtral API via raw fetch with multipart form data
 - `services/anonymization.ts` — Regex-based PII detection and masking
 - `services/llm.ts` — Raw fetch to OpenAI/Gemini/Mistral REST APIs
-- `services/audioStorage.ts` — Local audio file management via expo-file-system
+- `services/audioStorage.ts` — Audio file management (delegates to fileStorage on native)
 - `services/processing.ts` — Processing pipeline: transcribe → anonymize → LLM process
+- `services/fileStorage.ts` — File-based project/recording storage (native only)
 
 **Processing Pipeline:** Audio → Voxtral Transcribe v2 (API or local Mini 4B on mobile) → PII Anonymization (regex-based) → LLM Analysis (OpenAI/Gemini/Mistral)
 
@@ -50,6 +63,8 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - **expo-router is the sole router** — do not add `react-router-dom` or standalone `@react-navigation/*` navigators.
 - **New Architecture is required** (`newArchEnabled: true` in app.json) for ExecuTorch. Expo Go does not work — use Development Builds (`npx expo run:ios` / `run:android`).
 - **DB inserts must provide explicit values** for UUID/timestamp fields. Serialize Date objects to ISO strings. Don't include `null` values for optional fields — omit them instead.
+- **Platform-specific files** use Metro's `.web.ts` convention. `projects.ts`/`recordings.ts` are file-based (native); `projects.web.ts`/`recordings.web.ts` are SQLite-based (web).
+- **Recording IDs on native** are composite: `"{projectFolder}::{timestamp}"`. Parse with `parseRecordingId()` from `services/fileStorage.ts`.
 - `cross-env` is required in npm scripts for Windows compatibility.
 - Maps use WebView + Leaflet CDN on native, iframe + Leaflet CDN on web (no npm map packages).
 - **LLM/transcription SDKs**: Use raw `fetch` calls to provider REST APIs instead of Node.js SDKs for React Native compatibility.
@@ -58,6 +73,24 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 
 Configured per-project. Supported: OpenAI (gpt-4, gpt-4-turbo, gpt-3.5-turbo), Google Gemini (gemini-2.0-flash, gemini-1.5-pro/flash), Mistral (mistral-large/medium/small-latest). User API keys stored in the local `api_keys` table, managed via the Settings screen.
 
-## Database
+## Data Storage
 
-SQLite (expo-sqlite) with Drizzle ORM. Core tables: `projects` (with customFields and sensitiveWords as JSON text), `recordings` (status: pending→transcribing→anonymizing→processing→done/error, plus transcription/anonymization/LLM output fields, audioPath for local file), `api_keys` (single-row for LLM keys). Tables created on first launch via `initializeDatabase()` in `db/client.ts`.
+**Native (iOS/Android) — folder structure:**
+```
+{storageRoot}/                            ← configurable, default: documentDirectory/SafeTranscript/
+  {project-slug}/
+    config.json                           ← project settings (LLM config, custom fields, etc.)
+    recordings/
+      {timestamp}.json                    ← recording metadata (status, duration, PII mappings)
+      {timestamp}.m4a                     ← audio file
+    transcriptions/
+      {timestamp}.txt                     ← raw transcription (plain text)
+      {timestamp}.segments.json           ← transcription segments with timestamps
+      {timestamp}.anonymized.txt          ← anonymized transcription
+    llm_responses/
+      {timestamp}.md                      ← LLM output (markdown)
+```
+
+**Web — SQLite (sql.js):** Full SQLite tables for `projects` and `recordings` (same schema as before the file-based migration), persisted to localStorage.
+
+**All platforms — SQLite:** `api_keys` (single-row, LLM API keys), `settings` (key/value, e.g. `storage_root`). Tables created on first launch via `initializeDatabase()` in `db/client.ts`.

@@ -16,6 +16,8 @@ import {
 import { StatusBar } from "expo-status-bar";
 import { WidgetProvider } from "@/contexts/WidgetContext";
 import { initializeDatabase } from "@/db/client";
+import { getStorageRootSetting } from "@/db/operations/settings";
+import { setStorageRoot } from "@/services/fileStorage";
 import { colors } from "@/styles/commonStyles";
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
@@ -34,7 +36,18 @@ export default function RootLayout() {
 
   useEffect(() => {
     initializeDatabase()
-      .then(() => setDbReady(true))
+      .then(async () => {
+        // Load custom storage root from settings (if configured)
+        try {
+          const customRoot = await getStorageRootSetting();
+          if (customRoot) {
+            setStorageRoot(customRoot);
+          }
+        } catch (e) {
+          console.warn('[RootLayout] Failed to load storage root setting:', e);
+        }
+        setDbReady(true);
+      })
       .catch((err) => {
         console.error('[RootLayout] Failed to initialize database:', err);
         setDbReady(true); // Still render so the user sees an error

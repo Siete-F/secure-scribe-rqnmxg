@@ -1,81 +1,99 @@
-import { eq } from 'drizzle-orm';
-import { db } from '../client';
-import * as schema from '../schema';
+/**
+ * Recording operations – native build (file-based storage).
+ *
+ * Each recording is identified by a composite ID: "{projectFolder}::{timestamp}"
+ * Files are stored in the project folder structure:
+ *   recordings/{timestamp}.json   – metadata
+ *   recordings/{timestamp}.m4a    – audio
+ *   transcriptions/{timestamp}.txt – raw transcription
+ *   transcriptions/{timestamp}.segments.json – structured segments
+ *   transcriptions/{timestamp}.anonymized.txt – anonymized text
+ *   llm_responses/{timestamp}.md  – LLM output
+ */
 import type { Recording } from '@/types';
-import { deleteAudioFile } from '@/services/audioStorage';
+import * as FileStorage from '@/services/fileStorage';
 
-/** Parse a raw DB recording row into the app's Recording type */
-function toRecording(row: typeof schema.recordings.$inferSelect): Recording {
+// ---------------------------------------------------------------------------
+// Build a Recording object from the filesystem
+// ---------------------------------------------------------------------------
+
+async function buildRecording(
+  projectFolder: string,
+  timestamp: string,
+): Promise<Recording> {
+  const meta = await FileStorage.readRecordingMeta(projectFolder, timestamp);
+  const transcription = await FileStorage.readTranscription(projectFolder, timestamp);
+  const transcriptionData = await FileStorage.readTranscriptionSegments(projectFolder, timestamp);
+  const anonymized = await FileStorage.readAnonymizedTranscription(projectFolder, timestamp);
+  const llmOutput = await FileStorage.readLlmResponse(projectFolder, timestamp);
+  const audioPath = meta?.audioPath ?? (await FileStorage.getAudioPath(projectFolder, timestamp));
+
   return {
-    id: row.id,
-    projectId: row.projectId,
-    status: row.status as Recording['status'],
-    audioPath: row.audioPath ?? undefined,
-    audioDuration: row.audioDuration ?? undefined,
-    customFieldValues: row.customFieldValues ? JSON.parse(row.customFieldValues) : {},
-    transcription: row.transcription ?? undefined,
-    transcriptionData: row.transcriptionData ? JSON.parse(row.transcriptionData) : undefined,
-    anonymizedTranscription: row.anonymizedTranscription ?? undefined,
-    piiMappings: row.piiMappings ? JSON.parse(row.piiMappings) : undefined,
-    llmOutput: row.llmOutput ?? undefined,
-    errorMessage: row.errorMessage ?? undefined,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    id: FileStorage.makeRecordingId(projectFolder, timestamp),
+    projectId: projectFolder,
+    status: (meta?.status as Recording['status']) ?? 'pending',
+    audioPath: audioPath ?? undefined,
+    audioDuration: meta?.audioDuration,
+    customFieldValues: meta?.customFieldValues ?? {},
+    transcription: transcription ?? undefined,
+    transcriptionData: transcriptionData ?? undefined,
+    anonymizedTranscription: anonymized ?? undefined,
+    piiMappings: meta?.piiMappings,
+    llmOutput: llmOutput ?? undefined,
+    errorMessage: meta?.errorMessage ?? undefined,
+    createdAt: meta?.createdAt ?? '',
+    updatedAt: meta?.updatedAt,
   };
 }
 
+// ---------------------------------------------------------------------------
+// CRUD
+// ---------------------------------------------------------------------------
+
 /** List all recordings for a project */
 export async function getRecordingsByProject(projectId: string): Promise<Recording[]> {
-  const rows = await db
-    .select()
-    .from(schema.recordings)
-    .where(eq(schema.recordings.projectId, projectId))
-    .orderBy(schema.recordings.createdAt);
-
-  return rows.map(toRecording);
+  const timestamps = await FileStorage.listRecordingTimestamps(projectId);
+  const recordings = await Promise.all(
+    timestamps.map((ts) => buildRecording(projectId, ts)),
+  );
+  return recordings.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** Get a single recording by ID */
+/** Get a single recording by composite ID */
 export async function getRecordingById(id: string): Promise<Recording | null> {
-  const rows = await db
-    .select()
-    .from(schema.recordings)
-    .where(eq(schema.recordings.id, id))
-    .limit(1);
-  if (rows.length === 0) return null;
-  return toRecording(rows[0]);
+  try {
+    const { projectFolder, timestamp } = FileStorage.parseRecordingId(id);
+    return await buildRecording(projectFolder, timestamp);
+  } catch {
+    return null;
+  }
 }
 
 /** Create a new recording */
 export async function createRecording(
   projectId: string,
-  customFieldValues?: Record<string, any>
+  customFieldValues?: Record<string, any>,
 ): Promise<Recording> {
+  const timestamp = FileStorage.generateTimestampId();
   const now = new Date().toISOString();
-  const id = crypto.randomUUID();
 
-  const values = {
-    id,
-    projectId,
-    status: 'pending' as const,
-    customFieldValues: customFieldValues ? JSON.stringify(customFieldValues) : null,
+  const meta: FileStorage.RecordingMeta = {
+    status: 'pending',
+    customFieldValues: customFieldValues ?? {},
     createdAt: now,
     updatedAt: now,
   };
 
-  await db.insert(schema.recordings).values(values);
+  await FileStorage.writeRecordingMeta(projectId, timestamp, meta);
 
-  return toRecording({
-    ...values,
-    audioPath: null,
-    audioDuration: null,
-    transcription: null,
-    transcriptionData: null,
-    anonymizedTranscription: null,
-    piiMappings: null,
-    llmOutput: null,
-    errorMessage: null,
-  } as any);
+  return {
+    id: FileStorage.makeRecordingId(projectId, timestamp),
+    projectId,
+    status: 'pending',
+    customFieldValues: customFieldValues ?? {},
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 /** Update a recording (used by processing pipeline and other operations) */
@@ -92,47 +110,76 @@ export async function updateRecording(
     piiMappings: Record<string, string>;
     llmOutput: string;
     errorMessage: string;
-  }>
+  }>,
 ): Promise<void> {
-  const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+  const { projectFolder, timestamp } = FileStorage.parseRecordingId(id);
 
-  if (data.status !== undefined) updates.status = data.status;
-  if (data.audioPath !== undefined) updates.audioPath = data.audioPath;
-  if (data.audioDuration !== undefined) updates.audioDuration = data.audioDuration;
-  if (data.customFieldValues !== undefined) updates.customFieldValues = JSON.stringify(data.customFieldValues);
-  if (data.transcription !== undefined) updates.transcription = data.transcription;
-  if (data.transcriptionData !== undefined) updates.transcriptionData = JSON.stringify(data.transcriptionData);
-  if (data.anonymizedTranscription !== undefined) updates.anonymizedTranscription = data.anonymizedTranscription;
-  if (data.piiMappings !== undefined) updates.piiMappings = JSON.stringify(data.piiMappings);
-  if (data.llmOutput !== undefined) updates.llmOutput = data.llmOutput;
-  if (data.errorMessage !== undefined) updates.errorMessage = data.errorMessage;
+  // --- Update metadata JSON ---
+  const meta = (await FileStorage.readRecordingMeta(projectFolder, timestamp)) ?? {
+    status: 'pending',
+    customFieldValues: {},
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
-  await db.update(schema.recordings).set(updates).where(eq(schema.recordings.id, id));
+  meta.updatedAt = new Date().toISOString();
+  if (data.status !== undefined) meta.status = data.status;
+  if (data.audioPath !== undefined) meta.audioPath = data.audioPath;
+  if (data.audioDuration !== undefined) meta.audioDuration = data.audioDuration;
+  if (data.customFieldValues !== undefined) meta.customFieldValues = data.customFieldValues;
+  if (data.piiMappings !== undefined) meta.piiMappings = data.piiMappings;
+  if (data.errorMessage !== undefined) meta.errorMessage = data.errorMessage;
+
+  await FileStorage.writeRecordingMeta(projectFolder, timestamp, meta);
+
+  // --- Write content files ---
+  if (data.transcription !== undefined) {
+    await FileStorage.saveTranscription(projectFolder, timestamp, data.transcription);
+  }
+  if (data.transcriptionData !== undefined) {
+    await FileStorage.saveTranscriptionSegments(projectFolder, timestamp, data.transcriptionData);
+  }
+  if (data.anonymizedTranscription !== undefined) {
+    await FileStorage.saveAnonymizedTranscription(projectFolder, timestamp, data.anonymizedTranscription);
+  }
+  if (data.llmOutput !== undefined) {
+    await FileStorage.saveLlmResponse(projectFolder, timestamp, data.llmOutput);
+  }
 }
 
-/** Delete a recording and its audio file */
+/** Delete a recording and all its files */
 export async function deleteRecording(id: string): Promise<void> {
-  const recording = await getRecordingById(id);
-  if (recording?.audioPath) {
-    await deleteAudioFile(recording.audioPath);
-  }
-  await db.delete(schema.recordings).where(eq(schema.recordings.id, id));
+  const { projectFolder, timestamp } = FileStorage.parseRecordingId(id);
+  await FileStorage.deleteRecordingFiles(projectFolder, timestamp);
 }
 
 /** Move a recording to a different project and reset its processing state */
 export async function moveRecording(id: string, targetProjectId: string): Promise<void> {
-  await db
-    .update(schema.recordings)
-    .set({
-      projectId: targetProjectId,
-      status: 'pending',
-      transcription: null,
-      transcriptionData: null,
-      anonymizedTranscription: null,
-      piiMappings: null,
-      llmOutput: null,
-      errorMessage: null,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(schema.recordings.id, id));
+  const recording = await getRecordingById(id);
+  if (!recording) return;
+
+  const { projectFolder: srcFolder, timestamp } = FileStorage.parseRecordingId(id);
+
+  // Copy audio
+  const audioPath = await FileStorage.getAudioPath(srcFolder, timestamp);
+  if (audioPath) {
+    await FileStorage.saveAudio(targetProjectId, timestamp, audioPath);
+  }
+
+  // Write fresh metadata (reset processing state)
+  const srcMeta = await FileStorage.readRecordingMeta(srcFolder, timestamp);
+  const newMeta: FileStorage.RecordingMeta = {
+    status: 'pending',
+    customFieldValues: srcMeta?.customFieldValues ?? {},
+    createdAt: srcMeta?.createdAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  if (audioPath) {
+    const destAudio = await FileStorage.getAudioPath(targetProjectId, timestamp);
+    if (destAudio) newMeta.audioPath = destAudio;
+  }
+  await FileStorage.writeRecordingMeta(targetProjectId, timestamp, newMeta);
+
+  // Delete from source
+  await FileStorage.deleteRecordingFiles(srcFolder, timestamp);
 }

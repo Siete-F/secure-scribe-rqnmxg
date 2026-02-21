@@ -2,7 +2,7 @@
 
 A privacy-focused audio transcription and analysis application. Safe Transcript records audio, transcribes it using **Mistral Voxtral Transcribe v2 Realtime**, anonymizes personally identifiable information (PII) using regex-based detection, and then processes the cleaned transcript with a configurable LLM for structured output (e.g., summaries, action items).
 
-All data is stored locally on-device — SQLite database, local audio files, and API calls made directly from the device. No backend server required.
+All data is stored locally on-device. On iOS/Android, projects and recordings are stored as **plain files** (text, markdown, JSON) in a human-readable folder structure. On web, data is stored in SQLite. API keys are always kept in SQLite. No backend server required.
 
 ## Features
 
@@ -12,7 +12,7 @@ All data is stored locally on-device — SQLite database, local audio files, and
 - **LLM analysis** — sends anonymized transcripts to a configurable LLM provider (OpenAI, Google Gemini, or Mistral) with a custom prompt
 - **Project-based organization** — group recordings into projects with custom fields and export to CSV
 - **Cross-platform** — runs on iOS, Android, and Web (Expo / React Native)
-- **Fully local** — all data stored on-device in SQLite, API keys managed locally
+- **Fully local** — on mobile, data stored as plain text/markdown files in a browsable folder structure; on web, stored in SQLite. API keys managed locally in SQLite
 
 ## Repository Layout
 
@@ -28,18 +28,27 @@ All data is stored locally on-device — SQLite database, local audio files, and
 │       ├── [id].tsx            #   Recording detail (transcript, LLM output, audio player)
 │       └── new.tsx             #   New recording (mic capture + upload)
 ├── components/                 # Shared UI components
-├── db/                         # SQLite database (expo-sqlite + Drizzle ORM)
-│   ├── client.ts               #   Native database client
-│   ├── client.web.ts           #   Web database client (sql.js)
+├── db/                         # Database & data operations
+│   ├── client.ts               #   Native SQLite client (settings & API keys)
+│   ├── client.web.ts           #   Web SQLite client (sql.js, all data)
 │   ├── schema.ts               #   Drizzle ORM schema
 │   └── operations/             #   CRUD operations
+│       ├── projects.ts         #     File-based project ops (native)
+│       ├── projects.web.ts     #     SQLite project ops (web)
+│       ├── recordings.ts       #     File-based recording ops (native)
+│       ├── recordings.web.ts   #     SQLite recording ops (web)
+│       ├── settings.ts         #     App settings (storage root, etc.)
+│       ├── apikeys.ts          #     API key management
+│       └── export.ts           #     CSV/JSON export
 ├── hooks/                      # Custom React hooks
 │   └── useHybridTranscribe.ts  #   Unified transcription (local or API)
 ├── services/                   # On-device services
+│   ├── fileStorage.ts          #   File-based storage engine (native)
+│   ├── fileStorage.web.ts      #   File storage stub (web)
 │   ├── transcription.ts        #   Mistral Voxtral API via raw fetch
 │   ├── anonymization.ts        #   Regex-based PII detection & masking
 │   ├── llm.ts                  #   LLM provider abstraction (OpenAI, Gemini, Mistral)
-│   ├── audioStorage.ts         #   Local audio file management
+│   ├── audioStorage.ts         #   Audio file management
 │   ├── processing.ts           #   Processing pipeline
 │   └── LocalModelManager.ts    #   On-device model download & lifecycle
 ├── contexts/                   # React contexts
@@ -94,10 +103,33 @@ LLM Analysis            ──►  Structured output (summary, action items, etc
 | Layer | Technology |
 |---|---|
 | Mobile / Web | React Native (0.81.x), Expo SDK 54, Expo Router |
-| Database | SQLite (expo-sqlite), Drizzle ORM |
+| Storage (mobile) | Plain files (text, markdown, JSON) in folder structure via `expo-file-system` |
+| Storage (web) | SQLite via sql.js, persisted to localStorage |
+| Settings & Keys | SQLite (expo-sqlite), Drizzle ORM |
 | Transcription | Mistral Voxtral Transcribe v2 (API), Voxtral Mini 4B via ExecuTorch (on-device) |
 | PII Detection | Regex-based anonymization (on-device) |
 | LLM Providers | OpenAI, Google Gemini, Mistral (via raw fetch) |
+
+## Data Storage (iOS/Android)
+
+On mobile, all project data is stored as human-readable files in a configurable folder structure:
+
+```
+{storageRoot}/                            ← default: documentDirectory/SafeTranscript/
+  my-project/
+    config.json                           ← project settings (LLM config, custom fields, etc.)
+    recordings/
+      2024-01-15T10-30-00-123.json        ← recording metadata
+      2024-01-15T10-30-00-123.m4a         ← audio file
+    transcriptions/
+      2024-01-15T10-30-00-123.txt         ← raw transcription (plain text)
+      2024-01-15T10-30-00-123.segments.json
+      2024-01-15T10-30-00-123.anonymized.txt
+    llm_responses/
+      2024-01-15T10-30-00-123.md          ← LLM output (markdown)
+```
+
+The timestamp in the filename links the audio, transcription, and LLM response together. The storage root is configurable via the Settings screen.
 
 ## Scripts
 

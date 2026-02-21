@@ -1,53 +1,62 @@
-import { eq, sql } from 'drizzle-orm';
-import { db } from '../client';
-import * as schema from '../schema';
+/**
+ * Project operations – native build (file-based storage).
+ *
+ * Each project is a folder under the storage root containing a config.json
+ * and sub-folders for recordings, transcriptions, and llm_responses.
+ * The folder name (slug) is the project ID used throughout the app.
+ */
 import type { Project } from '@/types';
+import * as FileStorage from '@/services/fileStorage';
 
-/** Parse a raw DB project row into the app's Project type */
-function toProject(row: typeof schema.projects.$inferSelect, recordingCount?: number): Project {
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function configToProject(
+  folder: string,
+  config: FileStorage.ProjectConfig,
+  recordingCount?: number,
+): Project {
   return {
-    id: row.id,
-    name: row.name,
-    description: row.description ?? undefined,
-    llmProvider: row.llmProvider as Project['llmProvider'],
-    llmModel: row.llmModel,
-    llmPrompt: row.llmPrompt,
-    enableAnonymization: row.enableAnonymization,
-    customFields: row.customFields ? JSON.parse(row.customFields) : [],
-    sensitiveWords: row.sensitiveWords ? JSON.parse(row.sensitiveWords) : [],
+    id: folder,
+    name: config.name,
+    description: config.description,
+    llmProvider: config.llmProvider as Project['llmProvider'],
+    llmModel: config.llmModel,
+    llmPrompt: config.llmPrompt,
+    enableAnonymization: config.enableAnonymization,
+    customFields: config.customFields ?? [],
+    sensitiveWords: config.sensitiveWords ?? [],
     recordingCount,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    createdAt: config.createdAt,
+    updatedAt: config.updatedAt,
   };
 }
 
+// ---------------------------------------------------------------------------
+// CRUD
+// ---------------------------------------------------------------------------
+
 /** List all projects with recording counts */
 export async function getAllProjects(): Promise<Project[]> {
-  const rows = await db.select().from(schema.projects).orderBy(schema.projects.createdAt);
+  const folders = await FileStorage.listProjectFolders();
+  const projects: Project[] = [];
 
-  // Get recording counts in one query
-  const counts = await db
-    .select({
-      projectId: schema.recordings.projectId,
-      count: sql<number>`count(*)`.as('count'),
-    })
-    .from(schema.recordings)
-    .groupBy(schema.recordings.projectId);
+  for (const folder of folders) {
+    const config = await FileStorage.readProjectConfig(folder);
+    if (!config) continue;
+    const timestamps = await FileStorage.listRecordingTimestamps(folder);
+    projects.push(configToProject(folder, config, timestamps.length));
+  }
 
-  const countMap = new Map(counts.map((c) => [c.projectId, c.count]));
-
-  return rows.map((row) => toProject(row, countMap.get(row.id) ?? 0));
+  return projects.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
-/** Get a single project by ID */
+/** Get a single project by ID (folder name) */
 export async function getProjectById(id: string): Promise<Project | null> {
-  const rows = await db
-    .select()
-    .from(schema.projects)
-    .where(eq(schema.projects.id, id))
-    .limit(1);
-  if (rows.length === 0) return null;
-  return toProject(rows[0]);
+  const config = await FileStorage.readProjectConfig(id);
+  if (!config) return null;
+  return configToProject(id, config);
 }
 
 /** Create a new project */
@@ -62,25 +71,31 @@ export async function createProject(data: {
   sensitiveWords?: string[];
 }): Promise<Project> {
   const now = new Date().toISOString();
-  const id = crypto.randomUUID();
 
-  const values = {
-    id,
+  // Derive a unique folder slug from the project name
+  let folder = FileStorage.slugify(data.name);
+  const existing = await FileStorage.listProjectFolders();
+  if (existing.includes(folder)) {
+    let suffix = 2;
+    while (existing.includes(`${folder}-${suffix}`)) suffix++;
+    folder = `${folder}-${suffix}`;
+  }
+
+  const config: FileStorage.ProjectConfig = {
     name: data.name,
-    description: data.description ?? null,
+    description: data.description,
     llmProvider: data.llmProvider,
     llmModel: data.llmModel,
     llmPrompt: data.llmPrompt,
     enableAnonymization: data.enableAnonymization ?? true,
-    customFields: data.customFields ? JSON.stringify(data.customFields) : null,
-    sensitiveWords: data.sensitiveWords ? JSON.stringify(data.sensitiveWords) : null,
+    customFields: data.customFields ?? [],
+    sensitiveWords: data.sensitiveWords ?? [],
     createdAt: now,
     updatedAt: now,
   };
 
-  await db.insert(schema.projects).values(values);
-
-  return toProject({ ...values, enableAnonymization: values.enableAnonymization } as any);
+  await FileStorage.writeProjectConfig(folder, config);
+  return configToProject(folder, config, 0);
 }
 
 /** Update an existing project */
@@ -95,34 +110,47 @@ export async function updateProject(
     enableAnonymization: boolean;
     customFields: any[];
     sensitiveWords: string[];
-  }>
+  }>,
 ): Promise<Project | null> {
-  const updates: Record<string, any> = { updatedAt: new Date().toISOString() };
+  const config = await FileStorage.readProjectConfig(id);
+  if (!config) return null;
 
-  if (data.name !== undefined) updates.name = data.name;
-  if (data.description !== undefined) updates.description = data.description;
-  if (data.llmProvider !== undefined) updates.llmProvider = data.llmProvider;
-  if (data.llmModel !== undefined) updates.llmModel = data.llmModel;
-  if (data.llmPrompt !== undefined) updates.llmPrompt = data.llmPrompt;
-  if (data.enableAnonymization !== undefined) updates.enableAnonymization = data.enableAnonymization;
-  if (data.customFields !== undefined) updates.customFields = JSON.stringify(data.customFields);
-  if (data.sensitiveWords !== undefined) updates.sensitiveWords = JSON.stringify(data.sensitiveWords);
+  const updated: FileStorage.ProjectConfig = {
+    ...config,
+    updatedAt: new Date().toISOString(),
+  };
 
-  await db.update(schema.projects).set(updates).where(eq(schema.projects.id, id));
+  if (data.name !== undefined) updated.name = data.name;
+  if (data.description !== undefined) updated.description = data.description;
+  if (data.llmProvider !== undefined) updated.llmProvider = data.llmProvider;
+  if (data.llmModel !== undefined) updated.llmModel = data.llmModel;
+  if (data.llmPrompt !== undefined) updated.llmPrompt = data.llmPrompt;
+  if (data.enableAnonymization !== undefined) updated.enableAnonymization = data.enableAnonymization;
+  if (data.customFields !== undefined) updated.customFields = data.customFields;
+  if (data.sensitiveWords !== undefined) updated.sensitiveWords = data.sensitiveWords;
 
-  return getProjectById(id);
+  // If the name changed, try to rename the folder
+  let newFolder = id;
+  if (data.name !== undefined && data.name !== config.name) {
+    const newSlug = FileStorage.slugify(data.name);
+    if (newSlug !== id) {
+      const existing = await FileStorage.listProjectFolders();
+      if (!existing.includes(newSlug)) {
+        await FileStorage.renameProjectFolder(id, newSlug);
+        newFolder = newSlug;
+      }
+    }
+  }
+
+  await FileStorage.writeProjectConfig(newFolder, updated);
+  return configToProject(newFolder, updated);
 }
 
 /** Delete a project. Throws if it still has recordings. */
 export async function deleteProject(id: string): Promise<void> {
-  const [countRow] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(schema.recordings)
-    .where(eq(schema.recordings.projectId, id));
-
-  if (countRow && countRow.count > 0) {
+  const timestamps = await FileStorage.listRecordingTimestamps(id);
+  if (timestamps.length > 0) {
     throw new Error('Cannot delete project with existing recordings. Delete recordings first.');
   }
-
-  await db.delete(schema.projects).where(eq(schema.projects.id, id));
+  await FileStorage.deleteProjectFolder(id);
 }

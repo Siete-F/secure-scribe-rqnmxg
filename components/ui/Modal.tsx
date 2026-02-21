@@ -31,21 +31,21 @@ export function Modal({
   onConfirm,
   confirmText = 'OK',
   cancelText = 'Cancel',
-}: ModalProps) {
+}: Readonly<ModalProps>) {
   const isConfirm = type === 'confirm';
 
   const getIcon = () => {
     switch (type) {
       case 'success':
-        return { ios: 'checkmark.circle.fill', android: 'check-circle', color: colors.statusDone };
+        return { ios: 'checkmark.circle.fill', android: 'check-circle' as const, color: colors.statusDone };
       case 'error':
-        return { ios: 'xmark.circle.fill', android: 'error', color: colors.error };
+        return { ios: 'xmark.circle.fill', android: 'error' as const, color: colors.error };
       case 'warning':
-        return { ios: 'exclamationmark.triangle.fill', android: 'warning', color: colors.highlight };
+        return { ios: 'exclamationmark.triangle.fill', android: 'warning' as const, color: colors.highlight };
       case 'confirm':
-        return { ios: 'questionmark.circle.fill', android: 'help', color: colors.primary };
+        return { ios: 'questionmark.circle.fill', android: 'help' as const, color: colors.primary };
       default:
-        return { ios: 'info.circle.fill', android: 'info', color: colors.primary };
+        return { ios: 'info.circle.fill', android: 'info' as const, color: colors.primary };
     }
   };
 

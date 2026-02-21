@@ -7,7 +7,7 @@ import {
   Platform,
   Dimensions,
 } from 'react-native';
-import { useRouter, usePathname } from 'expo-router';
+import { useRouter, usePathname, Href } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/IconSymbol';
 import { BlurView } from 'expo-blur';
@@ -19,7 +19,6 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { Href } from 'expo-router';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -42,7 +41,7 @@ export default function FloatingTabBar({
   containerWidth = screenWidth / 2.5,
   borderRadius = 35,
   bottomMargin
-}: FloatingTabBarProps) {
+}: Readonly<FloatingTabBarProps>) {
   const router = useRouter();
   const pathname = usePathname();
   const theme = useTheme();
