@@ -36,5 +36,3 @@ android/
 ios/
 
 pnpm-lock.yaml
-
-backend/tsconfig.tsbuildinfo

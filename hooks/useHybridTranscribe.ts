@@ -99,7 +99,7 @@ export const useHybridTranscribe = () => {
    * Transcribe audio.
    *
    * @param audioUri    – file URI of the recorded audio
-   * @param recordingId – backend recording id (used for the API fallback)
+   * @param recordingId – recording id (used for the API fallback)
    * @param forceApi    – skip local model even if available
    */
   const transcribe = useCallback(

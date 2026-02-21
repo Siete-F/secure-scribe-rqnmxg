@@ -10,7 +10,6 @@ Safe Transcript is a privacy-focused audio transcription app. It records audio, 
 - **Database** (`db/`): SQLite via `expo-sqlite` + Drizzle ORM. Schema in `db/schema.ts`, client in `db/client.ts`, CRUD operations in `db/operations/`.
 - **Services** (`services/`): On-device processing — transcription (`transcription.ts`), PII anonymization (`anonymization.ts`), LLM processing (`llm.ts`), audio storage (`audioStorage.ts`), processing pipeline (`processing.ts`), local model management (`LocalModelManager.ts`).
 - **Hooks** (`hooks/`): Custom React hooks (e.g., `useHybridTranscribe` for unified local/API transcription).
-- **Backend** (`backend/`): Legacy — no longer used by the app. All data access is now local.
 
 ## Coding Conventions
 
