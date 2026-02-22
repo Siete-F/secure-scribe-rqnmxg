@@ -15,7 +15,6 @@
 import { Platform } from 'react-native';
 import { getWhisperModelPaths, getDownloadedWhisperVariant } from './WhisperModelManager';
 import { readWavAsFloat32, isWavExtension } from './audioUtils';
-import { convertToWav, deleteTempWav } from '@/services/audioConverter';
 import type { TranscriptionResult, TranscriptionSegment } from '@/services/transcription';
 
 /** Singleton module instance — loaded once, reused for all transcriptions */
@@ -111,10 +110,13 @@ export async function transcribeWithWhisper(
   let tempWavPath: string | null = null;
 
   if (!isWavExtension(audioUri)) {
-    console.log('[WhisperInference] Audio is not WAV — converting with FFmpeg...');
-    tempWavPath = await convertToWav(audioUri);
-    wavUri = tempWavPath;
-    console.log(`[WhisperInference] Converted to WAV: ${tempWavPath}`);
+    console.log('[WhisperInference] Audio is not WAV — converting with MediaCodec...');
+    // Lazy require to avoid loading native AudioConverter module at file evaluation time
+    const { convertToWav } = require('@/services/audioConverter') as { convertToWav: (uri: string) => Promise<string> };
+    const converted = await convertToWav(audioUri);
+    tempWavPath = converted;
+    wavUri = converted;
+    console.log(`[WhisperInference] Converted to WAV: ${converted}`);
   }
 
   try {
@@ -141,6 +143,7 @@ export async function transcribeWithWhisper(
   } finally {
     // Clean up temporary WAV file if we converted
     if (tempWavPath) {
+      const { deleteTempWav } = require('@/services/audioConverter');
       await deleteTempWav(tempWavPath);
     }
   }
