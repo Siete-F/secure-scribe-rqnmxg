@@ -17,6 +17,7 @@ import { anonymizeTranscription, reversePIIMappings } from './anonymization';
 import { processWithLLM } from './llm';
 import { checkWhisperModelExists } from './whisper/WhisperModelManager';
 import { isWavExtension } from './whisper/audioUtils';
+import { transcribeWithWhisper } from './whisper/whisperInference';
 
 interface PipelineOptions {
   /** Skip transcription and re-use the existing transcription text. */
@@ -77,7 +78,6 @@ export async function runProcessingPipeline(
 
       if (useLocalWhisper) {
         console.log('[Pipeline] Using LOCAL Whisper model for transcription');
-        const { transcribeWithWhisper } = require('./whisper/whisperInference');
         transcriptionData = await transcribeWithWhisper(audioUri, 'nl');
         transcriptionSource = 'whisper';
       } else {
