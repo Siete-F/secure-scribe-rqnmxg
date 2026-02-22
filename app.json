@@ -39,7 +39,15 @@
       "expo-file-system",
       "@react-native-community/datetimepicker",
       "expo-asset",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraMavenRepos": ["https://packages.arthenica.com/maven"]
+          }
+        }
+      ]
     ],
     "scheme": "safetranscript",
     "experiments": {
