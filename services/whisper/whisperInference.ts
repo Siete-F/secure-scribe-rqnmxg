@@ -76,18 +76,28 @@ export async function ensureWhisperLoaded(): Promise<boolean> {
 
     const variant = await getDownloadedWhisperVariant();
     console.log(`[WhisperInference] Loading Whisper ${variant} model...`);
+    console.log(`[WhisperInference] Encoder: ${paths.encoder}`);
+    console.log(`[WhisperInference] Decoder: ${paths.decoder}`);
+    console.log(`[WhisperInference] Tokenizer: ${paths.tokenizer}`);
 
     // Dynamically import SpeechToTextModule — safe now that we verified
     // the native module is linked above.
     const { SpeechToTextModule } = require('react-native-executorch');
     const module = new SpeechToTextModule();
 
-    // Pass local file:// URIs — ResourceFetcher handles them as LOCAL_FILE
+    // Paths from expo-file-system already include the file:// scheme
+    // (e.g. file:///data/user/0/.../whisper-stt/encoder.pte).
+    // ResourceFetcher.fetch() expects file:// URIs for local files and
+    // will strip the prefix before passing to the native module.
+    // Do NOT double-prefix with another file://.
+    const ensureFileUri = (p: string) =>
+      p.startsWith('file://') ? p : `file://${p}`;
+
     await module.load({
       isMultilingual: true,
-      encoderSource: `file://${paths.encoder}`,
-      decoderSource: `file://${paths.decoder}`,
-      tokenizerSource: `file://${paths.tokenizer}`,
+      encoderSource: ensureFileUri(paths.encoder),
+      decoderSource: ensureFileUri(paths.decoder),
+      tokenizerSource: ensureFileUri(paths.tokenizer),
     });
 
     sttModule = module;
