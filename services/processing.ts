@@ -1,7 +1,12 @@
 /**
  * Local processing pipeline
  * Runs transcription → anonymization → LLM processing on the device.
+ *
+ * Transcription routing:
+ *   1. If local Whisper model is downloaded AND audio is in WAV format → local transcription
+ *   2. Otherwise → Mistral Voxtral API (requires API key)
  */
+import { Platform } from 'react-native';
 import { getRecordingById, updateRecording } from '@/db/operations/recordings';
 import { getProjectById } from '@/db/operations/projects';
 import { getApiKeys } from '@/db/operations/apikeys';
@@ -9,6 +14,8 @@ import { getAudioFileUri } from './audioStorage';
 import { processTranscription } from './transcription';
 import { anonymizeTranscription, reversePIIMappings } from './anonymization';
 import { processWithLLM } from './llm';
+import { checkWhisperModelExists } from './whisper/WhisperModelManager';
+import { isWavExtension } from './whisper/audioUtils';
 
 interface PipelineOptions {
   /** Skip transcription and re-use the existing transcription text. */
@@ -34,7 +41,7 @@ export async function runProcessingPipeline(
     console.log(`[Pipeline] Starting for recording ${recordingId}`);
 
     const recording = await getRecordingById(recordingId);
-    if (!recording || !recording.audioPath) {
+    if (!recording?.audioPath) {
       console.warn('[Pipeline] Aborting — recording or audio path missing');
       return;
     }
@@ -58,16 +65,30 @@ export async function runProcessingPipeline(
       await updateRecording(recordingId, { status: 'transcribing' });
 
       const audioUri = getAudioFileUri(recording.audioPath);
-      const mistralKey = apiKeysRecord.mistralKey;
-      if (!mistralKey) {
-        throw new Error('Mistral API key not configured. Add it in Settings to enable transcription.');
-      }
 
-      const transcriptionData = await processTranscription(
-        audioUri,
-        mistralKey,
-        project.sensitiveWords
-      );
+      // Determine transcription method: local Whisper vs. remote API
+      const useLocalWhisper = await shouldUseLocalWhisper(audioUri);
+
+      let transcriptionData;
+      if (useLocalWhisper) {
+        console.log('[Pipeline] Using LOCAL Whisper model for transcription');
+        const { transcribeWithWhisper } = require('./whisper/whisperInference');
+        transcriptionData = await transcribeWithWhisper(audioUri, 'nl');
+      } else {
+        console.log('[Pipeline] Using Mistral API for transcription');
+        const mistralKey = apiKeysRecord.mistralKey;
+        if (!mistralKey) {
+          throw new Error(
+            'No transcription method available. Either download the Whisper model in Settings ' +
+            'for local transcription, or add a Mistral API key for cloud transcription.',
+          );
+        }
+        transcriptionData = await processTranscription(
+          audioUri,
+          mistralKey,
+          project.sensitiveWords,
+        );
+      }
 
       await updateRecording(recordingId, {
         transcription: transcriptionData.fullText,
@@ -142,5 +163,33 @@ export async function runProcessingPipeline(
       status: 'error',
       errorMessage: (error as Error).message,
     });
+  }
+}
+
+/**
+ * Determine if local Whisper transcription should be used.
+ * Requires: model downloaded + audio file is WAV format + native platform.
+ */
+async function shouldUseLocalWhisper(audioUri: string): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+
+  try {
+    // Check if audio is in WAV format (required for local inference)
+    if (!isWavExtension(audioUri)) {
+      console.log('[Pipeline] Audio is not WAV — cannot use local Whisper.');
+      return false;
+    }
+
+    // Check if Whisper model files are on disk
+    const modelExists = await checkWhisperModelExists();
+    if (!modelExists) {
+      console.log('[Pipeline] Whisper model not downloaded — using API.');
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.warn('[Pipeline] Error checking local Whisper availability:', error);
+    return false;
   }
 }

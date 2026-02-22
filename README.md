@@ -1,13 +1,13 @@
 # Safe Transcript
 
-A privacy-focused audio transcription and analysis application. Safe Transcript records audio, transcribes it using **Mistral Voxtral Transcribe v2 Realtime**, anonymizes personally identifiable information (PII) using regex-based detection, and then processes the cleaned transcript with a configurable LLM for structured output (e.g., summaries, action items).
+A privacy-focused audio transcription and analysis application. Safe Transcript records audio, transcribes it using either an **on-device Whisper model** or the **Mistral Voxtral Transcribe v2** API, anonymizes personally identifiable information (PII), and then processes the cleaned transcript with a configurable LLM for structured output (e.g., summaries, action items).
 
 All data is stored locally on-device. On iOS/Android, projects and recordings are stored as **plain files** (text, markdown, JSON) in a human-readable folder structure. On web, data is stored in SQLite. API keys are always kept in SQLite. No backend server required.
 
 ## Features
 
 - **Audio recording** with in-app microphone capture
-- **Speech-to-text** via Mistral Voxtral Transcribe v2 (with transcription keyword support for domain-specific terms), with optional on-device transcription using Voxtral Mini 4B through ExecuTorch on mobile
+- **Speech-to-text** via Mistral Voxtral Transcribe v2 (API, with keyword support for domain-specific terms) or **on-device Whisper** (multilingual, via ExecuTorch) — no API key needed for local transcription
 - **PII anonymization** — detects and masks phone numbers, emails, addresses, health IDs, credit card numbers, and more using regex-based detection
 - **LLM analysis** — sends anonymized transcripts to a configurable LLM provider (OpenAI, Google Gemini, or Mistral) with a custom prompt
 - **Project-based organization** — group recordings into projects with custom fields and export to CSV
@@ -40,8 +40,6 @@ All data is stored locally on-device. On iOS/Android, projects and recordings ar
 │       ├── settings.ts         #     App settings (storage root, etc.)
 │       ├── apikeys.ts          #     API key management
 │       └── export.ts           #     CSV/JSON export
-├── hooks/                      # Custom React hooks
-│   └── useHybridTranscribe.ts  #   Unified transcription (local or API)
 ├── services/                   # On-device services
 │   ├── fileStorage.ts          #   File-based storage engine (native)
 │   ├── fileStorage.web.ts      #   File storage stub (web)
@@ -49,8 +47,13 @@ All data is stored locally on-device. On iOS/Android, projects and recordings ar
 │   ├── anonymization.ts        #   Regex-based PII detection & masking
 │   ├── llm.ts                  #   LLM provider abstraction (OpenAI, Gemini, Mistral)
 │   ├── audioStorage.ts         #   Audio file management
-│   ├── processing.ts           #   Processing pipeline
-│   └── LocalModelManager.ts    #   On-device model download & lifecycle
+│   ├── processing.ts           #   Processing pipeline (auto-routes local vs API)
+│   ├── LocalModelManager.ts    #   Backward-compatible façade for whisper/
+│   └── whisper/                #   On-device Whisper transcription
+│       ├── config.ts           #     Model variant definitions (Base, Small)
+│       ├── WhisperModelManager.ts  # Download, verify & delete model files
+│       ├── audioUtils.ts       #     WAV parser → Float32Array
+│       └── whisperInference.ts #     ExecuTorch Whisper batch inference
 ├── contexts/                   # React contexts
 ├── utils/                      # Error logger
 ├── styles/                     # Shared styles
@@ -87,16 +90,27 @@ API keys (OpenAI, Gemini, Mistral) are entered in the Settings screen within the
 Audio Recording
       │
       ▼
-Voxtral Transcribe v2  ──►  Raw transcript (with timestamps & speaker labels)
-(API or local Voxtral       On mobile, the local Voxtral Mini 4B model is used
- Mini 4B on mobile)         when downloaded; otherwise falls back to the API.
+Transcription           ──►  Raw transcript
+  iOS + Whisper model:       On-device Whisper (Base or Small, multilingual)
+                             Records as WAV 16kHz mono, no API key needed.
+  Otherwise:                 Mistral Voxtral Transcribe v2 API
+                             Supports M4A, speaker labels, keyword bias.
       │                     Web always uses the API.
       ▼
-PII Anonymization       ──►  Masked transcript (regex-based, on-device)
+PII Anonymization       ──►  Masked transcript (GLiNER NER + regex, on-device)
       │
       ▼
 LLM Analysis            ──►  Structured output (summary, action items, etc.)
 ```
+
+### Why not Voxtral on-device?
+
+The original plan was to run Mistral's **Voxtral Mini 4B** locally via ExecuTorch. This turned out to be impractical:
+
+- **No public model weights in ExecuTorch format.** Voxtral has no official `.pte` export. The placeholder URL (`your-cdn.com/voxtral-mini-4b-q4.pte`) in the original code was never real — the download completed instantly because it never fetched an actual model file.
+- **Model size.** At ~2.5 GB (4-bit quantized), Voxtral Mini 4B is too large for most phones. The quantized Whisper Small model (~488 MB) provides good multilingual quality at a fraction of the size.
+- **No batch transcription API.** ExecuTorch's speech-to-text module is built around OpenAI Whisper's architecture (encoder + decoder `.pte` files). Voxtral uses a completely different Mistral-based architecture that is not supported by the `SpeechToTextModule`.
+- **Whisper works well.** OpenAI's Whisper multilingual models are proven for Dutch transcription, have official ExecuTorch exports hosted by Software Mansion, and integrate directly with `react-native-executorch`'s `SpeechToTextModule.transcribe()` for batch inference.
 
 ## Tech Stack
 
@@ -106,7 +120,7 @@ LLM Analysis            ──►  Structured output (summary, action items, etc
 | Storage (mobile) | Plain files (text, markdown, JSON) in folder structure via `expo-file-system` |
 | Storage (web) | SQLite via sql.js, persisted to localStorage |
 | Settings & Keys | SQLite (expo-sqlite), Drizzle ORM |
-| Transcription | Mistral Voxtral Transcribe v2 (API), Voxtral Mini 4B via ExecuTorch (on-device) |
+| Transcription | Mistral Voxtral Transcribe v2 (API), Whisper multilingual via ExecuTorch (on-device, iOS) |
 | PII Detection | Regex-based anonymization (on-device) |
 | LLM Providers | OpenAI, Google Gemini, Mistral (via raw fetch) |
 
@@ -120,7 +134,7 @@ On mobile, all project data is stored as human-readable files in a configurable 
     config.json                           ← project settings (LLM config, custom fields, etc.)
     recordings/
       2024-01-15T10-30-00-123.json        ← recording metadata
-      2024-01-15T10-30-00-123.m4a         ← audio file
+      2024-01-15T10-30-00-123.m4a/.wav     ← audio file (.wav when local Whisper is active)
     transcriptions/
       2024-01-15T10-30-00-123.txt         ← raw transcription (plain text)
       2024-01-15T10-30-00-123.segments.json

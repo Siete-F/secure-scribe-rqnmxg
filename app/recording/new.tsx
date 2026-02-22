@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams, Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -17,6 +18,7 @@ import {
   RecordingPresets,
   setAudioModeAsync,
 } from 'expo-audio';
+import { IOSOutputFormat, AudioQuality } from 'expo-audio/build/RecordingConstants';
 import { IconSymbol } from '@/components/IconSymbol';
 import { colors, commonStyles } from '@/styles/commonStyles';
 import { Project } from '@/types';
@@ -25,6 +27,38 @@ import { createRecording, updateRecording } from '@/db/operations/recordings';
 import { saveAudioFile } from '@/services/audioStorage';
 import { runProcessingPipeline } from '@/services/processing';
 import { Modal } from '@/components/ui/Modal';
+import { checkWhisperModelExists } from '@/services/whisper/WhisperModelManager';
+
+/**
+ * Recording preset for local Whisper transcription (iOS only).
+ * Records as 16kHz mono WAV (LPCM) which can be directly parsed to Float32Array.
+ * On Android, we keep the standard M4A format since MediaRecorder doesn't support WAV.
+ */
+const WHISPER_RECORDING_PRESET = Platform.OS === 'ios' ? {
+  extension: '.wav',
+  sampleRate: 16000,
+  numberOfChannels: 1,
+  bitRate: 256000,
+  ios: {
+    extension: '.wav',
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    outputFormat: IOSOutputFormat.LINEARPCM,
+    audioQuality: AudioQuality.MAX,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  android: {
+    // Not used on iOS, but required by type
+    outputFormat: 'mpeg4' as const,
+    audioEncoder: 'aac' as const,
+  },
+  web: {
+    mimeType: 'audio/webm',
+    bitsPerSecond: 128000,
+  },
+} : RecordingPresets.HIGH_QUALITY;
 
 export default function NewRecordingScreen() {
   const router = useRouter();
@@ -33,6 +67,7 @@ export default function NewRecordingScreen() {
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, any>>({});
   const [hasPermission, setHasPermission] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [whisperAvailable, setWhisperAvailable] = useState(false);
   const [modal, setModal] = useState<{
     visible: boolean;
     title: string;
@@ -45,7 +80,11 @@ export default function NewRecordingScreen() {
     type: 'info',
   });
 
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  // Use WAV preset on iOS when Whisper model is available, otherwise standard M4A
+  const recordingPreset = whisperAvailable && Platform.OS === 'ios'
+    ? WHISPER_RECORDING_PRESET
+    : RecordingPresets.HIGH_QUALITY;
+  const audioRecorder = useAudioRecorder(recordingPreset);
   const recorderState = useAudioRecorderState(audioRecorder);
 
   const loadProject = useCallback(async () => {
@@ -74,6 +113,12 @@ export default function NewRecordingScreen() {
   useEffect(() => {
     requestPermissions();
     loadProject();
+    // Check if local Whisper model is available
+    if (Platform.OS !== 'web') {
+      checkWhisperModelExists()
+        .then(setWhisperAvailable)
+        .catch(() => setWhisperAvailable(false));
+    }
   }, [projectId, loadProject]);
 
   const requestPermissions = async () => {
@@ -280,6 +325,16 @@ export default function NewRecordingScreen() {
             <Text style={styles.recordHint}>
               {isRecording ? 'Tap to stop recording' : 'Tap to start recording'}
             </Text>
+            {whisperAvailable && Platform.OS === 'ios' && (
+              <Text style={styles.localModelBadge}>
+                Local Whisper • Recording as WAV (16kHz)
+              </Text>
+            )}
+            {whisperAvailable && Platform.OS === 'android' && (
+              <Text style={styles.localModelBadge}>
+                Whisper downloaded • Using Mistral API (M4A format)
+              </Text>
+            )}
           </View>
         </View>
 
@@ -399,6 +454,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textSecondary,
     textAlign: 'center',
+  },
+  localModelBadge: {
+    fontSize: 12,
+    color: colors.primary,
+    textAlign: 'center',
+    marginTop: 8,
+    fontWeight: '600',
   },
   uploadingContainer: {
     padding: 16,

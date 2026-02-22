@@ -17,10 +17,14 @@ import { getMaskedApiKeys, saveApiKeys } from '@/db/operations/apikeys';
 import { Modal } from '@/components/ui/Modal';
 import {
   isLocalModelSupported,
-  checkModelExists,
-  downloadModel,
-  deleteModel,
+  checkWhisperModelExists,
+  downloadWhisperModel,
+  deleteWhisperModel,
+  getDownloadedWhisperVariant,
+  WHISPER_VARIANTS,
+  DEFAULT_WHISPER_VARIANT,
 } from '@/services/LocalModelManager';
+import type { WhisperVariantId } from '@/services/LocalModelManager';
 import {
   checkGLiNERModelExists,
   downloadGLiNERModel,
@@ -54,6 +58,8 @@ export default function SettingsScreen() {
   const [modelDownloaded, setModelDownloaded] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [selectedWhisperVariant, setSelectedWhisperVariant] = useState<WhisperVariantId>(DEFAULT_WHISPER_VARIANT);
+  const [downloadedWhisperVariant, setDownloadedWhisperVariant] = useState<WhisperVariantId | null>(null);
 
   const [piiModelDownloaded, setPiiModelDownloaded] = useState(false);
   const [piiDownloadProgress, setPiiDownloadProgress] = useState(0);
@@ -64,7 +70,11 @@ export default function SettingsScreen() {
   useEffect(() => {
     loadApiKeys();
     if (localModelAvailable) {
-      checkModelExists().then(setModelDownloaded).catch(() => setModelDownloaded(false));
+      checkWhisperModelExists().then(setModelDownloaded).catch(() => setModelDownloaded(false));
+      getDownloadedWhisperVariant().then((v) => {
+        setDownloadedWhisperVariant(v);
+        if (v) setSelectedWhisperVariant(v);
+      }).catch(() => {});
     }
     checkGLiNERModelExists().then(setPiiModelDownloaded).catch(() => setPiiModelDownloaded(false));
     getDownloadedVariant().then((v) => {
@@ -114,9 +124,11 @@ export default function SettingsScreen() {
     setIsDownloading(true);
     setDownloadProgress(0);
     try {
-      await downloadModel((p) => setDownloadProgress(p));
+      await downloadWhisperModel((p) => setDownloadProgress(p), selectedWhisperVariant);
       setModelDownloaded(true);
-      setModal({ visible: true, title: 'Success', message: 'Offline model downloaded successfully.', type: 'success' });
+      setDownloadedWhisperVariant(selectedWhisperVariant);
+      const variant = WHISPER_VARIANTS[selectedWhisperVariant];
+      setModal({ visible: true, title: 'Success', message: `${variant.name} downloaded successfully.`, type: 'success' });
     } catch (error) {
       setModal({ visible: true, title: 'Error', message: error instanceof Error ? error.message : 'Failed to download model', type: 'error' });
     } finally {
@@ -126,9 +138,10 @@ export default function SettingsScreen() {
 
   const handleDeleteModel = async () => {
     try {
-      await deleteModel();
+      await deleteWhisperModel();
       setModelDownloaded(false);
-      setModal({ visible: true, title: 'Success', message: 'Offline model removed.', type: 'success' });
+      setDownloadedWhisperVariant(null);
+      setModal({ visible: true, title: 'Success', message: 'Whisper model removed.', type: 'success' });
     } catch (error) {
       setModal({ visible: true, title: 'Error', message: error instanceof Error ? error.message : 'Failed to delete model', type: 'error' });
     }
@@ -217,15 +230,56 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>Offline Transcription</Text>
           <Text style={styles.sectionDescription}>
             {localModelAvailable
-              ? 'Download the Voxtral Mini 4B model (~2.5 GB) for on-device transcription.'
+              ? 'Download a Whisper multilingual model for on-device transcription. Supports Dutch and 90+ languages. No API key needed. Audio is recorded as WAV for local processing.'
               : 'Local transcription is only available on iOS and Android devices.'}
           </Text>
+
+          {/* Variant picker — only show when no model downloaded or switching */}
+          {localModelAvailable && !modelDownloaded && !isDownloading && (
+            <View style={styles.keyCard}>
+              <Text style={[styles.keyTitle, { marginBottom: 12 }]}>Choose Model Size</Text>
+              {(Object.keys(WHISPER_VARIANTS) as WhisperVariantId[]).map((variantId) => {
+                const variant = WHISPER_VARIANTS[variantId];
+                const isSelected = selectedWhisperVariant === variantId;
+                return (
+                  <TouchableOpacity
+                    key={variantId}
+                    style={[styles.variantOption, isSelected && styles.variantOptionSelected]}
+                    onPress={() => setSelectedWhisperVariant(variantId)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.variantRadio}>
+                      <View style={[styles.variantRadioInner, isSelected && styles.variantRadioInnerSelected]} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.variantName, isSelected && styles.variantNameSelected]}>
+                        {variant.name}
+                      </Text>
+                      <Text style={styles.variantDesc}>{variant.description}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+
           <View style={styles.keyCard}>
             <View style={styles.keyHeader}>
               <IconSymbol ios_icon_name="arrow.down.circle" android_material_icon_name="download" size={24} color={localModelAvailable ? colors.primary : colors.textSecondary} />
-              <Text style={[styles.keyTitle, !localModelAvailable && styles.textDisabled]}>Voxtral Mini 4B</Text>
+              <Text style={[styles.keyTitle, !localModelAvailable && styles.textDisabled]}>Whisper (ExecuTorch)</Text>
             </View>
-            <Text style={styles.keyStatus}>Status: {modelDownloaded ? 'Downloaded ✓' : 'Not downloaded'}</Text>
+            <Text style={styles.keyStatus}>
+              Status: {(() => {
+                if (!modelDownloaded) return 'Not downloaded';
+                const variantName = downloadedWhisperVariant ? WHISPER_VARIANTS[downloadedWhisperVariant].name : 'Unknown';
+                return `Downloaded ✓ (${variantName})`;
+              })()}
+            </Text>
+            <Text style={styles.keyNote}>
+              {modelDownloaded
+                ? 'Local transcription active — new recordings will be transcribed on-device without an API key. On iOS, audio is recorded as WAV for direct processing.'
+                : 'When downloaded, new recordings on iOS will be transcribed locally. On Android, M4A recordings still use the Mistral API.'}
+            </Text>
             {isDownloading && (
               <View style={styles.progressBarContainer}>
                 {(() => { const pct = Math.round(downloadProgress * 100); return (<><View style={[styles.progressBar, { width: `${pct}%` }]} /><Text style={styles.progressText}>{pct}%</Text></>); })()}
@@ -233,7 +287,9 @@ export default function SettingsScreen() {
             )}
             {localModelAvailable && !modelDownloaded && !isDownloading && (
               <TouchableOpacity style={styles.saveButton} onPress={handleDownloadModel} activeOpacity={0.7}>
-                <Text style={styles.saveButtonText}>Download Offline Model</Text>
+                <Text style={styles.saveButtonText}>
+                  Download {WHISPER_VARIANTS[selectedWhisperVariant].name} ({WHISPER_VARIANTS[selectedWhisperVariant].totalSizeMB} MB)
+                </Text>
               </TouchableOpacity>
             )}
             {localModelAvailable && modelDownloaded && (

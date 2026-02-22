@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Safe Transcript is a privacy-focused audio transcription app built with React Native (Expo). It records audio, transcribes it via Mistral Voxtral, anonymizes PII, and processes cleaned transcripts with a configurable LLM. The app is fully local — on iOS/Android, projects and recordings are stored as plain files (markdown, text, JSON) in a configurable folder structure; on web, data is stored in SQLite (sql.js). API keys and app settings remain in SQLite on all platforms. External API calls (transcription, LLM) are made directly from the device using user-provided API keys.
+Safe Transcript is a privacy-focused audio transcription app built with React Native (Expo). It records audio, transcribes it using either an on-device Whisper model (via ExecuTorch) or the Mistral Voxtral API, anonymizes PII, and  processes cleaned transcripts with a configurable LLM. The app is fully local — on iOS/Android, projects and recordings are stored as plain files (markdown, text, JSON) in a configurable folder structure; on web, data is stored in SQLite (sql.js). API keys and app settings remain in SQLite on all platforms. External API calls (transcription, LLM) are made directly from the device using user-provided API keys.
 
 ## Commands
 
@@ -25,7 +25,7 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - Screens in `app/` with tab navigation in `app/(tabs)/`
 - `@/` path alias for imports from the frontend root
 - No authentication — single-user local app
-- On-device transcription via `react-native-executorch` managed by `services/LocalModelManager.ts` and `hooks/useHybridTranscribe.ts`
+- On-device transcription via Whisper (ExecuTorch) managed by `services/whisper/` and `services/LocalModelManager.ts`
 
 **Storage (iOS/Android) — file-based:**
 - Projects and recordings stored as plain files in a configurable folder structure
@@ -51,10 +51,17 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - `services/anonymization.ts` — Regex-based PII detection and masking
 - `services/llm.ts` — Raw fetch to OpenAI/Gemini/Mistral REST APIs
 - `services/audioStorage.ts` — Audio file management (delegates to fileStorage on native)
-- `services/processing.ts` — Processing pipeline: transcribe → anonymize → LLM process
+- `services/processing.ts` — Processing pipeline: transcribe → anonymize → LLM process (auto-routes to local Whisper or Mistral API)
 - `services/fileStorage.ts` — File-based project/recording storage (native only)
+- `services/whisper/` — On-device Whisper transcription:
+  - `config.ts` — Model variant definitions (Base ~148MB, Small ~488MB) with HuggingFace URLs
+  - `WhisperModelManager.ts` — Download/delete/verify model files on disk (encoder, decoder, tokenizer)
+  - `WhisperModelManager.web.ts` — Web stub (local models not supported on web)
+  - `audioUtils.ts` — WAV file parser: reads PCM → Float32Array at 16kHz for Whisper input
+  - `whisperInference.ts` — Loads and runs Whisper via `SpeechToTextModule` (react-native-executorch)
+- `services/LocalModelManager.ts` — Backward-compatible façade that delegates to `services/whisper/`
 
-**Processing Pipeline:** Audio → Voxtral Transcribe v2 (API or local Mini 4B on mobile) → PII Anonymization (regex-based) → LLM Analysis (OpenAI/Gemini/Mistral)
+**Processing Pipeline:** Audio → Whisper (local, on iOS with WAV) or Voxtral Transcribe v2 (API) → PII Anonymization (regex-based or GLiNER) → LLM Analysis (OpenAI/Gemini/Mistral)
 
 ## Key Constraints
 
@@ -68,6 +75,7 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - `cross-env` is required in npm scripts for Windows compatibility.
 - Maps use WebView + Leaflet CDN on native, iframe + Leaflet CDN on web (no npm map packages).
 - **LLM/transcription SDKs**: Use raw `fetch` calls to provider REST APIs instead of Node.js SDKs for React Native compatibility.
+- **Local transcription** requires WAV audio (16kHz mono LPCM). On iOS, recordings switch to WAV format when the Whisper model is downloaded. On Android, MediaRecorder doesn't support WAV output, so recordings remain M4A and fall back to the Mistral API.
 
 ## LLM Providers
 
@@ -82,7 +90,7 @@ Configured per-project. Supported: OpenAI (gpt-4, gpt-4-turbo, gpt-3.5-turbo), G
     config.json                           ← project settings (LLM config, custom fields, etc.)
     recordings/
       {timestamp}.json                    ← recording metadata (status, duration, PII mappings)
-      {timestamp}.m4a                     ← audio file
+      {timestamp}.m4a / .wav               ← audio file (.wav when local Whisper is active on iOS)
     transcriptions/
       {timestamp}.txt                     ← raw transcription (plain text)
       {timestamp}.segments.json           ← transcription segments with timestamps

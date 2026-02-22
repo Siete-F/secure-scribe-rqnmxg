@@ -1,0 +1,175 @@
+/**
+ * Whisper Local Inference
+ *
+ * Uses react-native-executorch's SpeechToTextModule to run Whisper
+ * inference on-device. Provides batch transcription from audio files.
+ *
+ * The audio must be a WAV file recorded at 16kHz mono (LPCM).
+ * The WAV file is read and converted to Float32Array before passing
+ * to the model's transcribe() method.
+ *
+ * Only works on native platforms (iOS/Android) with New Architecture.
+ * Web is not supported.
+ */
+
+import { Platform } from 'react-native';
+import { getWhisperModelPaths, getDownloadedWhisperVariant } from './WhisperModelManager';
+import { readWavAsFloat32, isWavExtension } from './audioUtils';
+import type { TranscriptionResult, TranscriptionSegment } from '@/services/transcription';
+
+/** Singleton module instance — loaded once, reused for all transcriptions */
+let sttModule: any = null;
+let loadedVariant: string | null = null;
+let isLoading = false;
+
+/**
+ * Load the Whisper model into memory if not already loaded.
+ * Uses local file paths from WhisperModelManager.
+ * Returns true if model is ready for inference.
+ */
+export async function ensureWhisperLoaded(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  if (sttModule && loadedVariant) return true;
+  if (isLoading) return false; // Prevent concurrent loads
+
+  try {
+    isLoading = true;
+
+    const paths = await getWhisperModelPaths();
+    if (!paths) {
+      console.log('[WhisperInference] No model files found on disk.');
+      return false;
+    }
+
+    const variant = await getDownloadedWhisperVariant();
+    console.log(`[WhisperInference] Loading Whisper ${variant} model...`);
+
+    // Dynamically import SpeechToTextModule to avoid crashes on web
+    const { SpeechToTextModule } = require('react-native-executorch');
+    const module = new SpeechToTextModule();
+
+    // Pass local file:// URIs — ResourceFetcher handles them as LOCAL_FILE
+    await module.load({
+      isMultilingual: true,
+      encoderSource: `file://${paths.encoder}`,
+      decoderSource: `file://${paths.decoder}`,
+      tokenizerSource: `file://${paths.tokenizer}`,
+    });
+
+    sttModule = module;
+    loadedVariant = variant;
+    console.log(`[WhisperInference] Model loaded successfully.`);
+    return true;
+  } catch (error) {
+    console.error('[WhisperInference] Failed to load model:', error);
+    sttModule = null;
+    loadedVariant = null;
+    return false;
+  } finally {
+    isLoading = false;
+  }
+}
+
+/**
+ * Unload the Whisper model from memory to free resources.
+ */
+export function unloadWhisper(): void {
+  if (sttModule) {
+    try {
+      sttModule.delete();
+    } catch (e) {
+      console.warn('[WhisperInference] Error unloading model:', e);
+    }
+    sttModule = null;
+    loadedVariant = null;
+  }
+}
+
+/**
+ * Transcribe a WAV audio file using the local Whisper model.
+ *
+ * @param audioUri - Path to a WAV file (16kHz recommended, will resample if needed)
+ * @param language - Language code for transcription (default: 'nl' for Dutch)
+ * @returns TranscriptionResult compatible with the processing pipeline
+ * @throws Error if model is not loaded, audio is not WAV, or inference fails
+ */
+export async function transcribeWithWhisper(
+  audioUri: string,
+  language: string = 'nl',
+): Promise<TranscriptionResult> {
+  // Verify audio format
+  if (!isWavExtension(audioUri)) {
+    throw new Error(
+      'Local Whisper transcription requires WAV audio format. ' +
+      'This recording uses a compressed format that cannot be decoded on-device. ' +
+      'Falling back to API transcription.',
+    );
+  }
+
+  // Ensure model is loaded
+  const loaded = await ensureWhisperLoaded();
+  if (!loaded || !sttModule) {
+    throw new Error(
+      'Whisper model is not loaded. Please download the model in Settings first.',
+    );
+  }
+
+  console.log(`[WhisperInference] Reading WAV file: ${audioUri}`);
+  const waveform = await readWavAsFloat32(audioUri);
+  console.log(`[WhisperInference] Waveform: ${waveform.length} samples (${(waveform.length / 16000).toFixed(1)}s at 16kHz)`);
+
+  console.log(`[WhisperInference] Starting transcription (language: ${language})...`);
+  const startTime = Date.now();
+
+  const text = await sttModule.transcribe(waveform, { language });
+
+  const elapsed = Date.now() - startTime;
+  console.log(`[WhisperInference] Transcription complete in ${elapsed}ms: ${text.length} chars`);
+
+  // Convert to TranscriptionResult format
+  // Whisper batch mode returns a single text block — create one segment
+  const segments: TranscriptionSegment[] = splitIntoSegments(text);
+
+  return {
+    fullText: text.trim(),
+    segments,
+  };
+}
+
+/**
+ * Split transcription text into segments.
+ * Whisper batch mode returns a single text block, so we split by sentences
+ * and create segments with estimated timestamps.
+ */
+function splitIntoSegments(text: string): TranscriptionSegment[] {
+  if (!text?.trim()) {
+    return [{ speaker: 'Speaker 1', timestamp: 0, text: '[No speech detected]' }];
+  }
+
+  // Split by sentence boundaries
+  const sentences = text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+
+  if (sentences.length === 0) {
+    return [{ speaker: 'Speaker 1', timestamp: 0, text: text.trim() }];
+  }
+
+  // Create segments with estimated timestamps (evenly spaced)
+  return sentences.map((sentence, index) => ({
+    speaker: 'Speaker 1',
+    timestamp: index * 5000, // Estimate 5 seconds per sentence
+    text: sentence,
+  }));
+}
+
+/**
+ * Check if local Whisper transcription is available.
+ * Returns true if model files are on disk (does not require model to be loaded).
+ */
+export async function isWhisperAvailable(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const paths = await getWhisperModelPaths();
+  return paths !== null;
+}
