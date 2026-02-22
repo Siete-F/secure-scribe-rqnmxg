@@ -21,6 +21,8 @@ import type { TranscriptionResult, TranscriptionSegment } from '@/services/trans
 let sttModule: any = null;
 let loadedVariant: string | null = null;
 let isLoading = false;
+/** Stores the last error from ensureWhisperLoaded for diagnostic display */
+let lastLoadError: string | null = null;
 
 /**
  * Check whether the react-native-executorch native module is available.
@@ -50,18 +52,15 @@ function isExecutorchLinked(): boolean {
  * Returns true if model is ready for inference.
  */
 export async function ensureWhisperLoaded(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
+  if (Platform.OS === 'web') { lastLoadError = 'Web platform not supported'; return false; }
   if (sttModule && loadedVariant) return true;
-  if (isLoading) return false; // Prevent concurrent loads
+  if (isLoading) { lastLoadError = 'Model is already loading (concurrent load blocked)'; return false; }
 
   // Early-exit with a clear message when the native module is missing
   // (e.g. running in Expo Go instead of a Development Build)
   if (!isExecutorchLinked()) {
-    console.warn(
-      '[WhisperInference] react-native-executorch is not linked. ' +
-        'Local Whisper transcription requires a Development Build ' +
-        '(npx expo run:android / run:ios). Expo Go is not supported.',
-    );
+    lastLoadError = 'react-native-executorch native module is not linked. Requires a Development Build (not Expo Go).';
+    console.warn('[WhisperInference] ' + lastLoadError);
     return false;
   }
 
@@ -70,7 +69,8 @@ export async function ensureWhisperLoaded(): Promise<boolean> {
 
     const paths = await getWhisperModelPaths();
     if (!paths) {
-      console.log('[WhisperInference] No model files found on disk.');
+      lastLoadError = 'Model files not found on disk (getWhisperModelPaths returned null)';
+      console.log('[WhisperInference] ' + lastLoadError);
       return false;
     }
 
@@ -102,9 +102,12 @@ export async function ensureWhisperLoaded(): Promise<boolean> {
 
     sttModule = module;
     loadedVariant = variant;
+    lastLoadError = null;
     console.log(`[WhisperInference] Model loaded successfully.`);
     return true;
   } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    lastLoadError = `model.load() failed: ${errMsg}`;
     console.error('[WhisperInference] Failed to load model:', error);
     sttModule = null;
     loadedVariant = null;
