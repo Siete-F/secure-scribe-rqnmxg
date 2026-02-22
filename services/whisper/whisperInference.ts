@@ -23,6 +23,27 @@ let loadedVariant: string | null = null;
 let isLoading = false;
 
 /**
+ * Check whether the react-native-executorch native module is available.
+ * Returns false when running in Expo Go or if the dev build was not rebuilt
+ * after installing the package.
+ */
+function isExecutorchLinked(): boolean {
+  try {
+    // TurboModuleRegistry lookup – returns null when not linked
+    const { TurboModuleRegistry } = require('react-native');
+    // react-native-executorch registers several native modules; check the
+    // core one that SpeechToTextModule depends on
+    const nativeModule =
+      TurboModuleRegistry.get('ExpoExecutorch') ??
+      TurboModuleRegistry.get('RnExecutorch') ??
+      TurboModuleRegistry.get('ETModule');
+    return nativeModule != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Load the Whisper model into memory if not already loaded.
  * Uses local file paths from WhisperModelManager.
  * Returns true if model is ready for inference.
@@ -31,6 +52,17 @@ export async function ensureWhisperLoaded(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   if (sttModule && loadedVariant) return true;
   if (isLoading) return false; // Prevent concurrent loads
+
+  // Early-exit with a clear message when the native module is missing
+  // (e.g. running in Expo Go instead of a Development Build)
+  if (!isExecutorchLinked()) {
+    console.warn(
+      '[WhisperInference] react-native-executorch is not linked. ' +
+        'Local Whisper transcription requires a Development Build ' +
+        '(npx expo run:android / run:ios). Expo Go is not supported.',
+    );
+    return false;
+  }
 
   try {
     isLoading = true;
@@ -44,7 +76,8 @@ export async function ensureWhisperLoaded(): Promise<boolean> {
     const variant = await getDownloadedWhisperVariant();
     console.log(`[WhisperInference] Loading Whisper ${variant} model...`);
 
-    // Dynamically import SpeechToTextModule to avoid crashes on web
+    // Dynamically import SpeechToTextModule — safe now that we verified
+    // the native module is linked above.
     const { SpeechToTextModule } = require('react-native-executorch');
     const module = new SpeechToTextModule();
 
@@ -100,9 +133,10 @@ export async function transcribeWithWhisper(
   // Ensure model is loaded
   const loaded = await ensureWhisperLoaded();
   if (!loaded || !sttModule) {
-    throw new Error(
-      'Whisper model is not loaded. Please download the model in Settings first.',
-    );
+    const reason = isExecutorchLinked()
+      ? 'Whisper model is not loaded. Please download the model in Settings first.'
+      : 'Local Whisper requires a Development Build (npx expo run:android / run:ios). Expo Go is not supported.';
+    throw new Error(reason);
   }
 
   // If audio is not WAV, convert it first (e.g. M4A on Android)
@@ -179,10 +213,11 @@ function splitIntoSegments(text: string): TranscriptionSegment[] {
 
 /**
  * Check if local Whisper transcription is available.
- * Returns true if model files are on disk (does not require model to be loaded).
+ * Returns true if the native module is linked AND model files are on disk.
  */
 export async function isWhisperAvailable(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
+  if (!isExecutorchLinked()) return false;
   const paths = await getWhisperModelPaths();
   return paths !== null;
 }

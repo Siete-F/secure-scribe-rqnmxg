@@ -15,9 +15,8 @@ import { getAudioFileUri } from './audioStorage';
 import { processTranscription } from './transcription';
 import { anonymizeTranscription, reversePIIMappings } from './anonymization';
 import { processWithLLM } from './llm';
-import { checkWhisperModelExists } from './whisper/WhisperModelManager';
 import { isWavExtension } from './whisper/audioUtils';
-import { transcribeWithWhisper } from './whisper/whisperInference';
+import { transcribeWithWhisper, isWhisperAvailable } from './whisper/whisperInference';
 
 interface PipelineOptions {
   /** Skip transcription and re-use the existing transcription text. */
@@ -183,10 +182,10 @@ async function shouldUseLocalWhisper(audioUri: string): Promise<boolean> {
   if (Platform.OS === 'web') return false;
 
   try {
-    // Check if Whisper model files are on disk
-    const modelExists = await checkWhisperModelExists();
-    if (!modelExists) {
-      console.log('[Pipeline] Whisper model not downloaded — using API.');
+    // Check if Whisper model files are on disk AND native module is linked
+    const available = await isWhisperAvailable();
+    if (!available) {
+      console.log('[Pipeline] Whisper not available (model missing or native module not linked) — using API.');
       return false;
     }
 
