@@ -15,6 +15,7 @@
 import { Platform } from 'react-native';
 import { getWhisperModelPaths, getDownloadedWhisperVariant } from './WhisperModelManager';
 import { readWavAsFloat32, isWavExtension } from './audioUtils';
+import { convertToWav, deleteTempWav } from '@/services/audioConverter';
 import type { TranscriptionResult, TranscriptionSegment } from '@/services/transcription';
 
 /** Singleton module instance — loaded once, reused for all transcriptions */
@@ -88,24 +89,15 @@ export function unloadWhisper(): void {
 /**
  * Transcribe a WAV audio file using the local Whisper model.
  *
- * @param audioUri - Path to a WAV file (16kHz recommended, will resample if needed)
+ * @param audioUri - Path to an audio file (WAV preferred; M4A/other formats will be converted)
  * @param language - Language code for transcription (default: 'nl' for Dutch)
  * @returns TranscriptionResult compatible with the processing pipeline
- * @throws Error if model is not loaded, audio is not WAV, or inference fails
+ * @throws Error if model is not loaded or inference fails
  */
 export async function transcribeWithWhisper(
   audioUri: string,
   language: string = 'nl',
 ): Promise<TranscriptionResult> {
-  // Verify audio format
-  if (!isWavExtension(audioUri)) {
-    throw new Error(
-      'Local Whisper transcription requires WAV audio format. ' +
-      'This recording uses a compressed format that cannot be decoded on-device. ' +
-      'Falling back to API transcription.',
-    );
-  }
-
   // Ensure model is loaded
   const loaded = await ensureWhisperLoaded();
   if (!loaded || !sttModule) {
@@ -114,26 +106,44 @@ export async function transcribeWithWhisper(
     );
   }
 
-  console.log(`[WhisperInference] Reading WAV file: ${audioUri}`);
-  const waveform = await readWavAsFloat32(audioUri);
-  console.log(`[WhisperInference] Waveform: ${waveform.length} samples (${(waveform.length / 16000).toFixed(1)}s at 16kHz)`);
+  // If audio is not WAV, convert it first (e.g. M4A on Android)
+  let wavUri = audioUri;
+  let tempWavPath: string | null = null;
 
-  console.log(`[WhisperInference] Starting transcription (language: ${language})...`);
-  const startTime = Date.now();
+  if (!isWavExtension(audioUri)) {
+    console.log('[WhisperInference] Audio is not WAV — converting with FFmpeg...');
+    tempWavPath = await convertToWav(audioUri);
+    wavUri = tempWavPath;
+    console.log(`[WhisperInference] Converted to WAV: ${tempWavPath}`);
+  }
 
-  const text = await sttModule.transcribe(waveform, { language });
+  try {
+    console.log(`[WhisperInference] Reading WAV file: ${wavUri}`);
+    const waveform = await readWavAsFloat32(wavUri);
+    console.log(`[WhisperInference] Waveform: ${waveform.length} samples (${(waveform.length / 16000).toFixed(1)}s at 16kHz)`);
 
-  const elapsed = Date.now() - startTime;
-  console.log(`[WhisperInference] Transcription complete in ${elapsed}ms: ${text.length} chars`);
+    console.log(`[WhisperInference] Starting transcription (language: ${language})...`);
+    const startTime = Date.now();
 
-  // Convert to TranscriptionResult format
-  // Whisper batch mode returns a single text block — create one segment
-  const segments: TranscriptionSegment[] = splitIntoSegments(text);
+    const text = await sttModule.transcribe(waveform, { language });
 
-  return {
-    fullText: text.trim(),
-    segments,
-  };
+    const elapsed = Date.now() - startTime;
+    console.log(`[WhisperInference] Transcription complete in ${elapsed}ms: ${text.length} chars`);
+
+    // Convert to TranscriptionResult format
+    // Whisper batch mode returns a single text block — create one segment
+    const segments: TranscriptionSegment[] = splitIntoSegments(text);
+
+    return {
+      fullText: text.trim(),
+      segments,
+    };
+  } finally {
+    // Clean up temporary WAV file if we converted
+    if (tempWavPath) {
+      await deleteTempWav(tempWavPath);
+    }
+  }
 }
 
 /**

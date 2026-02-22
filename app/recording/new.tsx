@@ -332,7 +332,7 @@ export default function NewRecordingScreen() {
             )}
             {whisperAvailable && Platform.OS === 'android' && (
               <Text style={styles.localModelBadge}>
-                Whisper downloaded • Using Mistral API (M4A format)
+                Local Whisper • M4A → WAV auto-conversion
               </Text>
             )}
           </View>

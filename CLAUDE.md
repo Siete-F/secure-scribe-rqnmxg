@@ -51,17 +51,21 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - `services/anonymization.ts` — Regex-based PII detection and masking
 - `services/llm.ts` — Raw fetch to OpenAI/Gemini/Mistral REST APIs
 - `services/audioStorage.ts` — Audio file management (delegates to fileStorage on native)
-- `services/processing.ts` — Processing pipeline: transcribe → anonymize → LLM process (auto-routes to local Whisper or Mistral API)
+- `services/processing.ts` — Processing pipeline: transcribe → anonymize → LLM process (auto-routes to local Whisper or Mistral API). Supports `forceVoxtralApi` option for re-transcription.
+- `services/audioConverter.ts` — Converts M4A/other audio to 16kHz mono WAV via `ffmpeg-kit-react-native` for local Whisper on Android
+- `services/audioConverter.web.ts` — Web stub (no conversion needed)
 - `services/fileStorage.ts` — File-based project/recording storage (native only)
 - `services/whisper/` — On-device Whisper transcription:
   - `config.ts` — Model variant definitions (Base ~148MB, Small ~488MB) with HuggingFace URLs
   - `WhisperModelManager.ts` — Download/delete/verify model files on disk (encoder, decoder, tokenizer)
   - `WhisperModelManager.web.ts` — Web stub (local models not supported on web)
   - `audioUtils.ts` — WAV file parser: reads PCM → Float32Array at 16kHz for Whisper input
-  - `whisperInference.ts` — Loads and runs Whisper via `SpeechToTextModule` (react-native-executorch)
+  - `whisperInference.ts` — Loads and runs Whisper via `SpeechToTextModule` (react-native-executorch). Auto-converts non-WAV audio to WAV before inference.
 - `services/LocalModelManager.ts` — Backward-compatible façade that delegates to `services/whisper/`
 
-**Processing Pipeline:** Audio → Whisper (local, on iOS with WAV) or Voxtral Transcribe v2 (API) → PII Anonymization (regex-based or GLiNER) → LLM Analysis (OpenAI/Gemini/Mistral)
+**Processing Pipeline:** Audio → Whisper (local, on iOS/Android — M4A auto-converted to WAV on Android via FFmpeg) or Voxtral Transcribe v2 (API) → PII Anonymization (regex-based or GLiNER) → LLM Analysis (OpenAI/Gemini/Mistral)
+
+Recordings transcribed with Whisper can be **re-transcribed** with the Voxtral API from the recording detail screen. The `transcriptionSource` field (`'whisper' | 'voxtral-api'`) is stored in recording metadata to track which method was used.
 
 ## Key Constraints
 
@@ -75,7 +79,7 @@ Safe Transcript is a privacy-focused audio transcription app built with React Na
 - `cross-env` is required in npm scripts for Windows compatibility.
 - Maps use WebView + Leaflet CDN on native, iframe + Leaflet CDN on web (no npm map packages).
 - **LLM/transcription SDKs**: Use raw `fetch` calls to provider REST APIs instead of Node.js SDKs for React Native compatibility.
-- **Local transcription** requires WAV audio (16kHz mono LPCM). On iOS, recordings switch to WAV format when the Whisper model is downloaded. On Android, MediaRecorder doesn't support WAV output, so recordings remain M4A and fall back to the Mistral API.
+- **Local transcription** works on both iOS and Android. On iOS, recordings are directly captured as WAV (16kHz mono LPCM) when the Whisper model is downloaded. On Android, recordings are M4A (MediaRecorder limitation) and are automatically converted to WAV via `ffmpeg-kit-react-native` before Whisper inference. The temporary WAV is deleted after transcription.
 
 ## LLM Providers
 

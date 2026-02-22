@@ -3,7 +3,8 @@
  * Runs transcription → anonymization → LLM processing on the device.
  *
  * Transcription routing:
- *   1. If local Whisper model is downloaded AND audio is in WAV format → local transcription
+ *   1. If local Whisper model is downloaded → local transcription
+ *      (non-WAV audio like M4A is auto-converted to WAV via FFmpeg)
  *   2. Otherwise → Mistral Voxtral API (requires API key)
  */
 import { Platform } from 'react-native';
@@ -175,23 +176,22 @@ export async function runProcessingPipeline(
 
 /**
  * Determine if local Whisper transcription should be used.
- * Requires: model downloaded + audio file is WAV format + native platform.
+ * Requires: model downloaded + native platform.
+ * On Android, non-WAV audio (M4A) is automatically converted to WAV.
  */
 async function shouldUseLocalWhisper(audioUri: string): Promise<boolean> {
   if (Platform.OS === 'web') return false;
 
   try {
-    // Check if audio is in WAV format (required for local inference)
-    if (!isWavExtension(audioUri)) {
-      console.log('[Pipeline] Audio is not WAV — cannot use local Whisper.');
-      return false;
-    }
-
     // Check if Whisper model files are on disk
     const modelExists = await checkWhisperModelExists();
     if (!modelExists) {
       console.log('[Pipeline] Whisper model not downloaded — using API.');
       return false;
+    }
+
+    if (!isWavExtension(audioUri)) {
+      console.log('[Pipeline] Audio is not WAV — will convert to WAV for local Whisper.');
     }
 
     return true;

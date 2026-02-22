@@ -8,6 +8,7 @@ All data is stored locally on-device. On iOS/Android, projects and recordings ar
 
 - **Audio recording** with in-app microphone capture
 - **Speech-to-text** via Mistral Voxtral Transcribe v2 (API, with keyword support for domain-specific terms) or **on-device Whisper** (multilingual, via ExecuTorch) — no API key needed for local transcription
+- **Re-transcription** — recordings originally transcribed with Whisper can be re-transcribed with the Voxtral API for higher quality
 - **PII anonymization** — detects and masks phone numbers, emails, addresses, health IDs, credit card numbers, and more using regex-based detection
 - **LLM analysis** — sends anonymized transcripts to a configurable LLM provider (OpenAI, Google Gemini, or Mistral) with a custom prompt
 - **Project-based organization** — group recordings into projects with custom fields and export to CSV
@@ -48,6 +49,7 @@ All data is stored locally on-device. On iOS/Android, projects and recordings ar
 │   ├── llm.ts                  #   LLM provider abstraction (OpenAI, Gemini, Mistral)
 │   ├── audioStorage.ts         #   Audio file management
 │   ├── processing.ts           #   Processing pipeline (auto-routes local vs API)
+│   ├── audioConverter.ts       #   M4A → WAV conversion via FFmpeg (for Android Whisper)
 │   ├── LocalModelManager.ts    #   Backward-compatible façade for whisper/
 │   └── whisper/                #   On-device Whisper transcription
 │       ├── config.ts           #     Model variant definitions (Base, Small)
@@ -91,17 +93,21 @@ Audio Recording
       │
       ▼
 Transcription           ──►  Raw transcript
-  iOS + Whisper model:       On-device Whisper (Base or Small, multilingual)
-                             Records as WAV 16kHz mono, no API key needed.
-  Otherwise:                 Mistral Voxtral Transcribe v2 API
+  Whisper model downloaded:  On-device Whisper (Base or Small, multilingual)
+                             iOS: records as WAV 16kHz mono directly.
+                             Android: records M4A, auto-converts to WAV via FFmpeg.
+                             No API key needed.
+  No model / web:            Mistral Voxtral Transcribe v2 API
                              Supports M4A, speaker labels, keyword bias.
-      │                     Web always uses the API.
+      │
       ▼
 PII Anonymization       ──►  Masked transcript (GLiNER NER + regex, on-device)
       │
       ▼
 LLM Analysis            ──►  Structured output (summary, action items, etc.)
 ```
+
+Recordings transcribed with the local Whisper model can be **re-transcribed** with the Voxtral API from the recording detail screen (requires a Mistral API key).
 
 ### Why not Voxtral on-device?
 
@@ -120,7 +126,8 @@ The original plan was to run Mistral's **Voxtral Mini 4B** locally via ExecuTorc
 | Storage (mobile) | Plain files (text, markdown, JSON) in folder structure via `expo-file-system` |
 | Storage (web) | SQLite via sql.js, persisted to localStorage |
 | Settings & Keys | SQLite (expo-sqlite), Drizzle ORM |
-| Transcription | Mistral Voxtral Transcribe v2 (API), Whisper multilingual via ExecuTorch (on-device, iOS) |
+| Transcription | Mistral Voxtral Transcribe v2 (API), Whisper multilingual via ExecuTorch (on-device, iOS/Android) |
+| Audio conversion | ffmpeg-kit-react-native (M4A → WAV on Android for Whisper) |
 | PII Detection | Regex-based anonymization (on-device) |
 | LLM Providers | OpenAI, Google Gemini, Mistral (via raw fetch) |
 
